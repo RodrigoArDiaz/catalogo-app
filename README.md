@@ -29,3 +29,16 @@ depuración) publicado)
 | `catalogo-db` | MongoDB 7 | 27017 | — |
 El frontend es el único punto de entrada: nadie le habla a la base
 directamente, y a la API le habla el frontend.
+
+
+### MongoDB - authSource (Trabajo Practico Nº 1 - Ejercicio 6)
+
+El usuario inicial configurado mediante `MONGO_INITDB_ROOT_USERNAME` y
+`MONGO_INITDB_ROOT_PASSWORD` se crea en la base `admin`.
+
+Por este motivo, la cadena de conexión de la aplicación debe especificar:
+
+mongodb://catalogo_user:catalogo_pass@catalogo-db:27017/catalogo?authSource=admin
+
+Sin `authSource=admin`, MongoDB intenta autenticar al usuario contra la base
+`catalogo` y la autenticación falla.
