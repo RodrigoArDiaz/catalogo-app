@@ -60,7 +60,7 @@ vite.config.js        puerto de desarrollo y proxy hacia la API
 ```
 
 
-## Sustitución de variables de entorno en Nginx
+## Sustitución de variables de entorno en Nginx (Trabajo Practico Nº 2 - Ejercicio 6)
 La configuración de Nginx se genera al arrancar el contenedor a partir de
 default.conf.template. API_HOST y API_PORT indican el destino del backend.
 NGINX_ENVSUBST_FILTER=^API_ limita la sustitución a las variables que empiezan

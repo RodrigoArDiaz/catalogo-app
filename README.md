@@ -42,3 +42,34 @@ mongodb://catalogo_user:catalogo_pass@catalogo-db:27017/catalogo?authSource=admi
 
 Sin `authSource=admin`, MongoDB intenta autenticar al usuario contra la base
 `catalogo` y la autenticación falla.
+
+
+
+## Comparación de imágenes (Trabajo Practico Nº 2 - Ejercicio 8)
+
+Se utiliza la columna DISK USAGE de Docker, tomando 1.71 GB como 1710 MB.
+Los porcentajes son aproximados porque los tamaños mostrados están redondeados.
+
+| Imagen | Base final | Tamaño | Reducción respecto de API ingenua |
+|---|---|---:|---:|
+| catalogo-api:ingenua | python:3.12 | 1710 MB | — |
+| catalogo-api:v1 | python:3.12-slim | 258 MB | 84.91 % |
+| catalogo-api:v2 | python:3.12-slim | 258 MB | 84.91 % |
+| catalogo-frontend:v1 | nginxinc/nginx-unprivileged:1.27-alpine | 73.9 MB | 95.68 % |
+
+Fórmula: reducción (%) = (1 − tamaño final / tamaño ingenuo) × 100.
+
+El porcentaje del frontend es una comparación de tamaño entre componentes
+distintos; no representa una optimización de la misma aplicación.
+
+### Aporte de cada decisión (Trabajo Practico Nº 2 - Ejercicio 8)
+
+- Multi-etapa en la API: permite copiar las dependencias instaladas a una imagen final sin incorporar toda la etapa de construcción.
+- python:3.12-slim: reduce el tamaño de la base utilizada para ejecutar la API.
+- pip install --user: agrupa las dependencias en un directorio que se puede copiar entre etapas.
+- pip --no-cache-dir: evita guardar la caché de descargas en el builder; esa caché tampoco se transfiere a la imagen final.
+- Manifiestos antes del código: permite reutilizar la capa de dependencias cuando solo cambia el código, reduciendo el tiempo de reconstrucción.
+- .dockerignore: excluye archivos locales innecesarios del contexto y de las instrucciones COPY.
+- Multi-etapa en el frontend: deja únicamente los archivos compilados y Nginx, sin Node, npm, node_modules ni código fuente.
+- Usuarios sin privilegios: limitan los permisos del proceso durante la ejecución.
+- ARG y ENV para APP_VERSION: permiten definir la versión durante el build y consultarla al ejecutar el contenedor.
