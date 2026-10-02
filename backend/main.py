@@ -310,3 +310,5 @@ def actualizar(id_: str, producto: ProductoIn):
 def eliminar(id_: str):
     if productos.delete_one({"_id": a_object_id(id_)}).deleted_count == 0:
         raise HTTPException(status_code=404, detail="no encontrado")
+
+# Prueba de cache: cambio en el codigo - Trabajo Practico Nº 2 - Ejercicio 10

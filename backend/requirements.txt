@@ -1,3 +1,5 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 pymongo==4.8.0
+
+# Prueba de cache: cambio en el manifiesto - Trabajo Practico Nº 2 - Ejercicio 10

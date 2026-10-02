@@ -83,3 +83,8 @@ heredado de python:3.12-slim. Entre las capas agregadas por nuestro Dockerfile,
 la mayor ocupa 53 MB y corresponde a las dependencias de Python copiadas desde
 /root/.local del builder hacia /home/appuser/.local de la etapa final.
 El código de la aplicación aporta solamente 557 kB.
+
+## Cache - (Trabajo Practico Nº 2 - Ejercicio 10)
+
+Al modificar únicamente el código, la instalación de dependencias se reutiliza desde el caché porque requirements.txt se copia e instala antes que el código.
+Al modificar requirements.txt, se invalida su capa de COPY y el RUN de instalación que depende de ella, por lo que pip install vuelve a ejecutarse.
