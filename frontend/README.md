@@ -58,3 +58,11 @@ src/components/       grilla de productos, filtros, navbar y ficha ampliada
 nginx/templates/      configuración de nginx para servir dist/
 vite.config.js        puerto de desarrollo y proxy hacia la API
 ```
+
+
+## Sustitución de variables de entorno en Nginx
+La configuración de Nginx se genera al arrancar el contenedor a partir de
+default.conf.template. API_HOST y API_PORT indican el destino del backend.
+NGINX_ENVSUBST_FILTER=^API_ limita la sustitución a las variables que empiezan
+con API_, preservando las variables propias de Nginx, como $uri, $host y
+$proxy_add_x_forwarded_for.
