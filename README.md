@@ -88,3 +88,18 @@ El código de la aplicación aporta solamente 557 kB.
 
 Al modificar únicamente el código, la instalación de dependencias se reutiliza desde el caché porque requirements.txt se copia e instala antes que el código.
 Al modificar requirements.txt, se invalida su capa de COPY y el RUN de instalación que depende de ella, por lo que pip install vuelve a ejecutarse.
+
+## Publicación en Docker Hub - (Trabajo Practico Nº 2 - Ejercicio 11)
+
+Imágenes publicadas:
+
+- diazrodrigoar/catalogo-api:v1
+- diazrodrigoar/catalogo-api:v2
+- diazrodrigoar/catalogo-frontend:v1
+
+ catalogo-api: https://hub.docker.com/repository/docker/diazrodrigoar/catalogo-api
+
+ catalogo-frontend: https://hub.docker.com/repository/docker/diazrodrigoar/catalogo-frontend
+
+Se utilizó docker login para autenticarse, docker tag para agregar el
+prefijo del usuario y docker push para subir las imágenes al registry.
