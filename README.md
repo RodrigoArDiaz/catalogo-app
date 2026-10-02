@@ -73,3 +73,13 @@ distintos; no representa una optimización de la misma aplicación.
 - Multi-etapa en el frontend: deja únicamente los archivos compilados y Nginx, sin Node, npm, node_modules ni código fuente.
 - Usuarios sin privilegios: limitan los permisos del proceso durante la ejecución.
 - ARG y ENV para APP_VERSION: permiten definir la versión durante el build y consultarla al ejecutar el contenedor.
+
+## Análisis de capas de la API (Trabajo Practico Nº 2 - Ejercicio 9)
+
+Se inspeccionó catalogo-api:v1 con docker history, excluyendo las capas de 0B.
+
+La capa de mayor tamaño ocupa 87.6 MB y corresponde al sistema base Debian,
+heredado de python:3.12-slim. Entre las capas agregadas por nuestro Dockerfile,
+la mayor ocupa 53 MB y corresponde a las dependencias de Python copiadas desde
+/root/.local del builder hacia /home/appuser/.local de la etapa final.
+El código de la aplicación aporta solamente 557 kB.
