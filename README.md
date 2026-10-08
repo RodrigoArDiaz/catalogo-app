@@ -103,3 +103,44 @@ Imágenes publicadas:
 
 Se utilizó docker login para autenticarse, docker tag para agregar el
 prefijo del usuario y docker push para subir las imágenes al registry.
+
+## Contenedor catalogo-db (Trabajo Practico Nº 3 - Ejercicio 2)
+
+```bash
+docker run -d \
+  --name catalogo-db \
+  --network catalogo-net \
+  -e MONGO_INITDB_ROOT_USERNAME=catalogo_user \
+  -e MONGO_INITDB_ROOT_PASSWORD=catalogo_pass \
+  -v catalogo-db-data:/data/db \
+  mongo:7
+```
+
+Salida:
+
+```
+be7a7f70d351eee26bf2df02163aa1665b1eee87c57c0edb28c815389a1b6b25
+```
+
+```bash
+docker ps --filter name=catalogo-db
+```
+
+```
+CONTAINER ID   IMAGE     COMMAND                  CREATED         STATUS         PORTS       NAMES
+be7a7f70d351   mongo:7   "docker-entrypoint.s…"   4 minutes ago   Up 4 minutes   27017/tcp   catalogo-db
+```
+
+Línea del registro que informa que el motor se encuentra a la espera de conexiones:
+
+```
+{"t":{"$date":"2026-10-08T20:43:48.400+00:00"},"s":"I",  "c":"NETWORK",  "id":23016,   "ctx":"listener","msg":"Waiting for connections","attr":{"port":27017,"ssl":"off"}}
+```
+
+### Justificación de la ausencia de `-p`
+
+La base de datos es la capa más interna del stack: solo la API (`catalogo-api`)
+necesita conectarse a ella, y ambos contenedores comparten la red `catalogo-net`.
+Publicar el puerto 27017 en el anfitrión expondría MongoDB fuera de esa red sin
+necesidad. Al omitir `-p`, el motor solo es alcanzable por nombre (`catalogo-db`)
+desde los contenedores conectados a `catalogo-net`.
