@@ -177,3 +177,13 @@ y nginx reenvía al backend por la red Docker.
 No se observan solicitudes OPTIONS: al pasar por el proxy de nginx no hay CORS
 entre orígenes distintos, porque la API se consume bajo el mismo host y puerto
 que la aplicación web.
+
+## Proxy y ROOT_PATH (Trabajo Practico Nº 3 - Ejercicio 7)
+
+### Explicación
+
+Con `ROOT_PATH=/api`, FastAPI incluye el prefijo en `openapi.json`
+(`servers: [{url: "/api"}]`) y Swagger genera URLs relativas a `/api/...`, que
+coinciden con el proxy. Sin `ROOT_PATH`, las URLs se generan desde la raíz
+(`/productos`, `/docs`, etc.); a través del proxy en `localhost:3000/api/docs`
+esas rutas no existen y la interfaz no carga.
