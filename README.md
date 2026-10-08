@@ -166,3 +166,14 @@ El frontend se inició en la red bridge predeterminada porque se omitió
 `--network catalogo-net`, por lo que no pudo resolver el nombre `catalogo-api`.
 Nginx intenta resolver el upstream al arrancar y, al fallar, termina con código 1
 en lugar de iniciar y reintentar.
+
+## Frontend en catalogo-net (Trabajo Practico Nº 3 - Ejercicio 6)
+
+Al crear un producto con imagen desde `http://localhost:3000`, la petición POST
+aparece en la pestaña Network como `http://localhost:3000/api/productos` (mismo
+origen). No hay llamadas directas a `localhost:8000`: el navegador habla con nginx
+y nginx reenvía al backend por la red Docker.
+
+No se observan solicitudes OPTIONS: al pasar por el proxy de nginx no hay CORS
+entre orígenes distintos, porque la API se consume bajo el mismo host y puerto
+que la aplicación web.
