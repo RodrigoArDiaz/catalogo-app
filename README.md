@@ -187,3 +187,26 @@ Con `ROOT_PATH=/api`, FastAPI incluye el prefijo en `openapi.json`
 coinciden con el proxy. Sin `ROOT_PATH`, las URLs se generan desde la raíz
 (`/productos`, `/docs`, etc.); a través del proxy en `localhost:3000/api/docs`
 esas rutas no existen y la interfaz no carga.
+
+## Orden de arranque (Trabajo Practico Nº 3 - Ejercicio 9)
+
+El orden es: **Red → Volumen → Base de datos → API → Frontend**
+
+| Paso | Motivo y consecuencia de alterar el orden |
+| --- | --- |
+| 1. Red `catalogo-net` | Debe existir antes de iniciar contenedores con `--network catalogo-net`. Si no existe, Docker falla con `network catalogo-net not found`. |
+| 2. Volumen `catalogo-db-data` | Se crea para almacenar los datos de MongoDB. Si no se crea antes, `docker run -v` lo crea automáticamente: invertir este paso no necesariamente genera un error. |
+| 3. Base `catalogo-db` | Debe estar lista para aceptar conexiones antes de iniciar la API. Que el contenedor esté ejecutándose no significa que MongoDB haya terminado de inicializar. |
+| 4. API `catalogo-api` | Si arranca antes de que la base esté disponible, falla la conexión y puede reintentar o fallar su inicialización. Si la base todavía no existe en la red, también puede fallar la resolución de su nombre. |
+| 5. Frontend `catalogo-frontend` | Nginx necesita resolver `catalogo-api` al arrancar. Si ese nombre todavía no existe en la red, termina con `host not found in upstream`. Si el nombre resuelve pero la API aún no atiende, Nginx puede arrancar y devolver `502 Bad Gateway` al solicitar datos. |
+
+### Limitación actual
+
+Hay que ejecutar los comandos en el orden correcto y comprobar cuándo está listo
+cada servicio. Ese procedimiento todavía no está declarado en un archivo que
+automatice el despliegue.
+
+En la próxima etapa, Docker Compose permitirá declarar servicios, red, volumen y
+dependencias. Para esperar a que una base esté realmente lista, se necesita un
+healthcheck y una dependencia condicionada a ese estado; el orden de inicio por
+sí solo no garantiza disponibilidad.
