@@ -144,3 +144,25 @@ necesita conectarse a ella, y ambos contenedores comparten la red `catalogo-net`
 Publicar el puerto 27017 en el anfitrión expondría MongoDB fuera de esa red sin
 necesidad. Al omitir `-p`, el motor solo es alcanzable por nombre (`catalogo-db`)
 desde los contenedores conectados a `catalogo-net`.
+
+## Dos modos de falla del motor (Trabajo Practico Nº 3 - Ejercicio 4)
+
+### Explicación
+
+Con `DB_HOST=catalogo-bd` (nombre mal escrito), el cliente no resuelve el host en
+la red Docker: el fallo ocurre antes de contactar a MongoDB, por eso el registro
+habla de resolución de nombre y no de credenciales incorrectas.
+
+Con `mongosh` sin `?authSource=admin`, la conexión sí llega al servidor
+(`catalogo-db` resuelve), pero MongoDB intenta autenticar al usuario contra la
+base `catalogodb` en lugar de `admin`, donde fue creado con
+`MONGO_INITDB_ROOT_*`; por eso el mensaje es de autenticación fallida.
+
+## Frontend fuera de la red (Trabajo Practico Nº 3 - Ejercicio 5)
+
+### Explicación
+
+El frontend se inició en la red bridge predeterminada porque se omitió
+`--network catalogo-net`, por lo que no pudo resolver el nombre `catalogo-api`.
+Nginx intenta resolver el upstream al arrancar y, al fallar, termina con código 1
+en lugar de iniciar y reintentar.
