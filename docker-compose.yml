@@ -1,0 +1,51 @@
+services:
+  catalogo-db:
+    container_name: catalogo-db
+    image: mongo:7
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: catalogo_user
+      MONGO_INITDB_ROOT_PASSWORD: catalogo_pass
+    volumes:
+      - catalogo-db-data:/data/db
+    networks:
+      - catalogo-net
+
+  catalogo-api:
+    container_name: catalogo-api
+    build:
+      context: ./backend
+    image: catalogo-api:v1
+    environment:
+      DB_HOST: catalogo-db
+      DB_PORT: "27017"
+      DB_NAME: catalogodb
+      DB_USER: catalogo_user
+      DB_PASSWORD: catalogo_pass
+      APP_VERSION: v1
+      ROOT_PATH: /api
+      SEED_DEMO: "true"
+    ports:
+      - "8000:8000"
+    networks:
+      - catalogo-net
+
+  catalogo-frontend:
+    container_name: catalogo-frontend
+    build:
+      context: ./frontend
+    image: catalogo-frontend:v1
+    environment:
+      API_HOST: catalogo-api
+      API_PORT: "8000"
+    ports:
+      - "3000:8080"
+    networks:
+      - catalogo-net
+
+networks:
+  catalogo-net:
+    name: catalogo-net
+
+volumes:
+  catalogo-db-data:
+    name: catalogo-db-data
