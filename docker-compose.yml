@@ -9,6 +9,14 @@ services:
       - catalogo-db-data:/data/db
     networks:
       - catalogo-net
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mongosh --quiet --eval "db.adminCommand('ping').ok" || exit 1
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   catalogo-api:
     container_name: catalogo-api

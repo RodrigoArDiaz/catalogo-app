@@ -210,3 +210,41 @@ En la próxima etapa, Docker Compose permitirá declarar servicios, red, volumen
 dependencias. Para esperar a que una base esté realmente lista, se necesita un
 healthcheck y una dependencia condicionada a ese estado; el orden de inicio por
 sí solo no garantiza disponibilidad.
+
+## Healthcheck de catalogo-db (Trabajo Practico Nº 4 - Ejercicio 2)
+
+```yaml
+healthcheck:
+  test:
+    - CMD-SHELL
+    - mongosh --quiet --eval "db.adminCommand('ping').ok" || exit 1
+  interval: 5s
+  timeout: 3s
+  retries: 10
+  start_period: 10s
+```
+
+### Por qué no lleva credenciales
+
+`db.adminCommand('ping')` es un comando administrativo que MongoDB acepta sin
+autenticación: solo comprueba que el motor responda en el puerto 27017. El
+cliente `mongosh` ya viene incluido en la imagen `mongo:7`, por lo que no hace
+falta instalar dependencias adicionales.
+
+En la variante B (PostgreSQL), el healthcheck equivalente es
+`pg_isready -U notas_user -d notasdb`, que requiere indicar el usuario y, en la
+práctica, la contraseña viaja en el comando o en variables visibles para el
+proceso del healthcheck. Eso implica que la credencial queda expuesta en la
+definición del servicio, en `docker inspect` y en los logs del daemon. En
+MongoDB, `ping` evita ese problema: el chequeo de salud no necesita conocer
+`catalogo_user` ni `catalogo_pass`.
+
+### Qué no verifica
+
+Que `ping` responda con éxito no prueba que el usuario `catalogo_user` exista,
+ni que la contraseña configurada en `MONGO_INITDB_ROOT_PASSWORD` sea la correcta,
+ni que la base `catalogodb` esté accesible con autenticación. Solo confirma que
+el servidor MongoDB acepta conexiones. La API puede fallar igualmente con
+`Authentication failed` aunque Compose declare el servicio como `healthy` — por
+ejemplo, si el volumen ya fue inicializado con otra contraseña o falta
+`authSource=admin` en la cadena de conexión.
