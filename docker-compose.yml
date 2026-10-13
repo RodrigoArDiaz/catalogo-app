@@ -55,6 +55,14 @@ services:
       - "3000:8080"
     networks:
       - catalogo-net
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - -O
+        - "-"
+        - http://127.0.0.1:8080/healthz
 
 networks:
   catalogo-net:
