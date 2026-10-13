@@ -271,3 +271,45 @@ runtime — contradice la optimización de tamaño practicada en el Trabajo Prá
 Nº 2. Además, si la respuesta no es 2xx, `urlopen` lanza excepción y el
 proceso termina con código distinto de cero, que es justo lo que Docker necesita
 para marcar el servicio como `unhealthy`.
+
+## depends_on con condición (Trabajo Practico Nº 4 - Ejercicio 5)
+
+```yaml
+# catalogo-api
+depends_on:
+  catalogo-db:
+    condition: service_healthy
+
+# catalogo-frontend
+depends_on:
+  catalogo-api:
+    condition: service_healthy
+```
+
+Los dos casos no son equivalentes:
+
+### a) `catalogo-api` respecto de `catalogo-db`
+
+La API debe conectarse a MongoDB y sembrar el catálogo al arrancar. La forma
+corta `depends_on: [catalogo-db]` solo espera a que el contenedor de la base
+entre en ejecución, no a que MongoDB acepte conexiones: el proceso puede estar
+corriendo mientras el motor todavía se inicializa. Por eso se usa
+`condition: service_healthy`, que espera a que el healthcheck de `catalogo-db`
+(`mongosh` + `ping`) responda con éxito.
+
+Además, la API reintenta la conexión durante unos 30 segundos
+(`esperar_mongo` en `main.py`). Ese reintento es lo único que subsistirá en
+Kubernetes, donde no existe `depends_on`: allí la API dependerá únicamente de
+ese bucle de reconexión si arranca antes que la base.
+
+### b) `catalogo-frontend` respecto de `catalogo-api`
+
+Lo que no puede faltar es algún `depends_on` hacia la API. Sin él, el frontend
+arranca antes que `catalogo-api`, nginx intenta resolver el upstream al iniciar
+y termina con `host not found in upstream "catalogo-api"`.
+
+A nginx le basta con que el nombre resuelva en la red Docker — la forma corta
+`depends_on: [catalogo-api]` también evita ese fallo. `service_healthy` agrega
+que la API ya esté respondiendo en `/health` antes de arrancar nginx, evitando
+respuestas `502 Bad Gateway` en los primeros segundos mientras uvicorn todavía
+está levantando.
