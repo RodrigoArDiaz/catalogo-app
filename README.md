@@ -248,3 +248,26 @@ el servidor MongoDB acepta conexiones. La API puede fallar igualmente con
 `Authentication failed` aunque Compose declare el servicio como `healthy` — por
 ejemplo, si el volumen ya fue inicializado con otra contraseña o falta
 `authSource=admin` en la cadena de conexión.
+
+## Healthcheck de catalogo-api (Trabajo Practico Nº 4 - Ejercicio 3)
+
+```yaml
+healthcheck:
+  test:
+    - CMD
+    - python
+    - -c
+    - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
+```
+
+### Por qué no instalar curl solo para el healthcheck
+
+La imagen `catalogo-api:v1` ya incluye Python; el módulo `urllib` forma parte de la
+biblioteca estándar y permite hacer un GET a `/health` sin agregar paquetes al
+Dockerfile. Instalar `curl` solo para el healthcheck implicaría una instrucción
+`RUN apt-get install curl` (o equivalente) que agranda la imagen, invalida capas
+en caché y añade una dependencia de sistema que la aplicación no usa en
+runtime — contradice la optimización de tamaño practicada en el Trabajo Práctico
+Nº 2. Además, si la respuesta no es 2xx, `urlopen` lanza excepción y el
+proceso termina con código distinto de cero, que es justo lo que Docker necesita
+para marcar el servicio como `unhealthy`.

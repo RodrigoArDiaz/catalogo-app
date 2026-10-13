@@ -36,6 +36,12 @@ services:
       - "8000:8000"
     networks:
       - catalogo-net
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
 
   catalogo-frontend:
     container_name: catalogo-frontend
