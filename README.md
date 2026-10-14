@@ -313,3 +313,15 @@ A nginx le basta con que el nombre resuelva en la red Docker — la forma corta
 que la API ya esté respondiendo en `/health` antes de arrancar nginx, evitando
 respuestas `502 Bad Gateway` en los primeros segundos mientras uvicorn todavía
 está levantando.
+
+## Diferencia entre `down` y `down -v`  (Trabajo Practico Nº 4 - Ejercicio 7)
+
+`docker compose down` borra lo que el próximo `up` recrea igual: contenedores y
+red. El volumen `catalogo-db-data` —declarado con `name:` explícito en el
+compose— sobrevive con todos los documentos de MongoDB. Un `up` posterior
+monta el mismo volumen y la base retoma el estado anterior.
+
+`docker compose down -v` agrega la eliminación de los volúmenes declarados en
+el archivo. Con `-v`, `catalogo-db-data` desaparece de `docker volume ls` y
+el próximo `up` arranca MongoDB sobre un volumen vacío: se aplican de nuevo las
+variables `MONGO_INITDB_*` y la API ejecuta la siembra del catálogo demo.
