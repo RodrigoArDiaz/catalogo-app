@@ -3,8 +3,8 @@ services:
     container_name: catalogo-db
     image: mongo:7
     environment:
-      MONGO_INITDB_ROOT_USERNAME: catalogo_user
-      MONGO_INITDB_ROOT_PASSWORD: catalogo_pass
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
     volumes:
       - catalogo-db-data:/data/db
     networks:
@@ -24,14 +24,14 @@ services:
       context: ./backend
     image: catalogo-api:v1
     environment:
-      DB_HOST: catalogo-db
-      DB_PORT: "27017"
-      DB_NAME: catalogodb
-      DB_USER: catalogo_user
-      DB_PASSWORD: catalogo_pass
-      APP_VERSION: v1
-      ROOT_PATH: /api
-      SEED_DEMO: "true"
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      APP_VERSION: ${APP_VERSION}
+      ROOT_PATH: ${ROOT_PATH}
+      SEED_DEMO: ${SEED_DEMO}
     ports:
       - "8000:8000"
     networks:
@@ -52,8 +52,8 @@ services:
       context: ./frontend
     image: catalogo-frontend:v1
     environment:
-      API_HOST: catalogo-api
-      API_PORT: "8000"
+      API_HOST: ${API_HOST}
+      API_PORT: ${API_PORT}
     ports:
       - "3000:8080"
     networks:

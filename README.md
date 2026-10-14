@@ -325,3 +325,23 @@ monta el mismo volumen y la base retoma el estado anterior.
 el archivo. Con `-v`, `catalogo-db-data` desaparece de `docker volume ls` y
 el próximo `up` arranca MongoDB sobre un volumen vacío: se aplican de nuevo las
 variables `MONGO_INITDB_*` y la API ejecuta la siembra del catálogo demo.
+
+## Variables de entorno (Trabajo Practico Nº 4 - Ejercicio 9)
+
+El contrato completo de variables está en [`.env.example`](.env.example), con
+comentarios que indican qué componente consume cada una (`catalogo-db`,
+`catalogo-api`, `catalogo-frontend`). Para levantar el stack con valores
+locales:
+
+```bash
+cp .env.example .env
+docker compose up -d
+```
+
+El archivo `.env` figura en [`.gitignore`](.gitignore) y no se versiona. Compose
+interpola `${VAR}` desde `.env` al resolver `docker-compose.yml`.
+
+La API acepta `MONGO_URI` como alternativa a `DB_HOST`, `DB_PORT`, `DB_NAME`,
+`DB_USER` y `DB_PASSWORD`. Esa cadena incluye la contraseña en texto plano; en
+Kubernetes (semana 7) debe ubicarse completa en un **Secret**, nunca en un
+ConfigMap.
