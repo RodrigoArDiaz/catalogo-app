@@ -2,6 +2,8 @@ services:
   catalogo-db:
     container_name: catalogo-db
     image: mongo:7
+    cap_drop:
+      - ALL
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
@@ -23,6 +25,8 @@ services:
     build:
       context: ./backend
     image: catalogo-api:v1
+    cap_drop:
+      - ALL
     environment:
       DB_HOST: ${DB_HOST}
       DB_PORT: ${DB_PORT}
@@ -51,6 +55,8 @@ services:
     build:
       context: ./frontend
     image: catalogo-frontend:v1
+    cap_drop:
+      - ALL
     environment:
       API_HOST: ${API_HOST}
       API_PORT: ${API_PORT}

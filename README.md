@@ -434,3 +434,51 @@ y se arregla reconstruyendo sobre una imagen padre más nueva.
 En la tabla de Trivy, la columna **Fixed Version** indica si existe versión
 corregida. El objetivo no es llegar a cero CVE, sino saber qué hay y haber
 decidido qué aceptar, mitigar o actualizar.
+
+## Mínimo privilegio — `cap_drop: [ALL]` (Trabajo Practico Nº 4 - Ejercicio 11)
+
+### Paso 1: quitar todas las capabilities
+
+Se agregó `cap_drop: [ALL]` a los tres servicios en `docker-compose.yml`:
+
+```yaml
+cap_drop:
+  - ALL
+```
+
+Comprobación:
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose logs catalogo-db
+```
+
+Salida de `docker compose up -d`:
+
+```
+✔ Network catalogo-net    Created
+✘ Container catalogo-db   Error dependency catalogo-db failed to start
+✔ Container catalogo-api  Created
+✔ Container catalogo-frontend Created
+dependency failed to start: container catalogo-db exited (1)
+```
+
+`catalogo-api` y `catalogo-frontend` quedan en estado **Created** (no arrancan)
+porque dependen de `catalogo-db` con `condition: service_healthy`. Las dos imágenes
+propias están preparadas para funcionar sin capabilities extra — corren como
+`appuser` y `nginx` (uid 101), no como root —; en este paso no alcanzan a
+demostrarlo porque la base no levanta.
+
+`catalogo-db` termina con código 1. Logs:
+
+```
+find: '/data/db/journal': Permission denied
+find: '/data/db/diagnostic.data': Permission denied
+find: '/data/db/.mongodb': Permission denied
+```
+
+Sin ninguna capability, el entrypoint de MongoDB no puede recorrer ni preparar
+el directorio de datos en el volumen. El siguiente paso es agregar con
+`cap_add` solo las capabilities mínimas que pida el error, de a una, hasta que
+el servicio alcance `(healthy)`.
