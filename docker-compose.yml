@@ -4,6 +4,12 @@ services:
     image: mongo:7
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN  # primera prueba;
+      - FOWNER # segunda prueba;
+      - DAC_OVERRIDE # tercera prueba;
+      - SETUID # cuarta prueba;
+      - SETGID # quinta prueba -> healthy;
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}

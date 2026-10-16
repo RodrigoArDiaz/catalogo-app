@@ -479,6 +479,60 @@ find: '/data/db/.mongodb': Permission denied
 ```
 
 Sin ninguna capability, el entrypoint de MongoDB no puede recorrer ni preparar
-el directorio de datos en el volumen. El siguiente paso es agregar con
-`cap_add` solo las capabilities mínimas que pida el error, de a una, hasta que
-el servicio alcance `(healthy)`.
+el directorio de datos en el volumen.
+
+### Paso 2: `cap_add` de a una hasta `(healthy)`
+
+Se fue agregando una capability por vez en `catalogo-db`, levantando de nuevo y
+leyendo el error en cada paso:
+
+| Orden | `cap_add` | Resultado |
+| --- | --- | --- |
+| 1 | `CHOWN` | Sigue fallando — aún no puede ignorar restricciones de dueño ni permisos DAC |
+| 2 | `FOWNER` | Sigue fallando — falta bypass de permisos sobre archivos del datadir |
+| 3 | `DAC_OVERRIDE` | Sigue fallando — el entrypoint puede preparar `/data/db`, pero no cambiar de usuario |
+| 4 | `SETUID` | Sigue fallando — falta complemento para el cambio de identidad del proceso |
+| 5 | `SETGID` | **`(healthy)`** — MongoDB arranca y acepta conexiones |
+
+Configuración final de `catalogo-db`:
+
+```yaml
+cap_drop:
+  - ALL
+cap_add:
+  - CHOWN
+  - FOWNER
+  - DAC_OVERRIDE
+  - SETUID
+  - SETGID
+```
+
+`catalogo-api` y `catalogo-frontend` conservan solo `cap_drop: [ALL]`, sin
+`cap_add`.
+
+Verificación del stack completo:
+
+```bash
+docker compose up -d
+docker compose ps
+```
+
+Los tres servicios alcanzan `(healthy)` y la aplicación responde:
+
+```bash
+curl -s localhost:3000/api/productos | head -c 200
+```
+
+### Por qué la base necesita capabilities y las otras dos capas no
+
+| Servicio | Usuario de ejecución | `cap_drop: [ALL]` | `cap_add` | Motivo |
+| --- | --- | --- | --- | --- |
+| `catalogo-api` | `appuser` (uid 1000) | Sí | ninguna | Imagen multi-etapa con `USER appuser`: nunca es root, no hace `chown` ni `setuid` |
+| `catalogo-frontend` | `nginx` (uid 101) | Sí | ninguna | Imagen `nginx-unprivileged`: nginx arranca sin privilegios de root |
+| `catalogo-db` | root → `mongodb` | Sí | CHOWN, FOWNER, DAC_OVERRIDE, SETUID, SETGID | Entrypoint oficial arranca como root, ajusta permisos de `/data/db` en el volumen y luego hace `setuid`/`setgid` al usuario `mongodb` |
+
+Las dos imágenes propias heredan el diseño del Trabajo Práctico Nº 2 (usuario no
+privilegiado en el Dockerfile). MongoDB, en cambio, usa el entrypoint de la
+imagen oficial: necesita un subconjunto mínimo de capabilities para preparar el
+datadir y bajar de root a su usuario de servicio. No se usa `privileged: true`:
+se quitan todas las capabilities y se devuelven solo las cinco imprescindibles.
