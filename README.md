@@ -536,3 +536,113 @@ privilegiado en el Dockerfile). MongoDB, en cambio, usa el entrypoint de la
 imagen oficial: necesita un subconjunto mínimo de capabilities para preparar el
 datadir y bajar de root a su usuario de servicio. No se usa `privileged: true`:
 se quitan todas las capabilities y se devuelven solo las cinco imprescindibles.
+
+## De tres `docker run` a un `docker-compose.yml` (Trabajo Practico Nº 4 - Ejercicio 12)
+
+En la semana 3 el stack se levantaba con pasos manuales y tres contenedores por
+separado. En la semana 4, un único archivo declara la misma arquitectura.
+
+### Semana 3 — lo que había que ejecutar
+
+```bash
+# 0. Infraestructura (antes de los contenedores)
+docker network create catalogo-net
+docker volume create catalogo-db-data
+
+# 1. Base de datos
+docker run -d \
+  --name catalogo-db \
+  --network catalogo-net \
+  -e MONGO_INITDB_ROOT_USERNAME=catalogo_user \
+  -e MONGO_INITDB_ROOT_PASSWORD=catalogo_pass \
+  -v catalogo-db-data:/data/db \
+  mongo:7
+
+# 2. API (después de que MongoDB acepte conexiones)
+docker run -d \
+  --name catalogo-api \
+  --network catalogo-net \
+  -e DB_HOST=catalogo-db \
+  -e DB_PORT=27017 \
+  -e DB_NAME=catalogodb \
+  -e DB_USER=catalogo_user \
+  -e DB_PASSWORD=catalogo_pass \
+  -e APP_VERSION=v1 \
+  -e ROOT_PATH=/api \
+  -e SEED_DEMO=true \
+  -p 8000:8000 \
+  catalogo-api:v1
+
+# 3. Frontend (después de que exista catalogo-api en la red)
+docker run -d \
+  --name catalogo-frontend \
+  --network catalogo-net \
+  -e API_HOST=catalogo-api \
+  -e API_PORT=8000 \
+  -p 3000:8080 \
+  catalogo-frontend:v1
+```
+
+Las imágenes propias se construían aparte (`docker build -t catalogo-api:v1
+./backend`, idem frontend) antes del `docker run`.
+
+### Semana 4 — un solo comando
+
+```bash
+cp .env.example .env   # contrato de variables
+docker compose config
+docker compose up --build -d
+```
+
+### Qué se conserva (misma arquitectura, otro formato)
+
+| Semana 3 (`docker run`) | Semana 4 (`docker-compose.yml`) |
+| --- | --- |
+| `--name catalogo-*` | `container_name:` |
+| `--network catalogo-net` | `networks:` + bloque `networks.catalogo-net.name` |
+| `-v catalogo-db-data:/data/db` | `volumes:` + bloque `volumes.catalogo-db-data.name` |
+| `-e VAR=valor` | `environment:` con `${VAR}` desde `.env` |
+| `-p 3000:8080` / `-p 8000:8000` | `ports:` |
+| Sin `-p` en la base | sin `ports` en `catalogo-db` |
+| `docker build` + etiqueta | `build:` + `image:` en el mismo servicio |
+
+Red, volumen, nombres de contenedor, variables, puertos y rutas de build son los
+mismos; solo cambió la notación declarativa.
+
+### Qué desapareció
+
+| Antes (semana 3) | Por qué ya no hace falta |
+| --- | --- |
+| `docker network create catalogo-net` | Compose crea la red al hacer `up` (con `name:` explícito) |
+| `docker volume create catalogo-db-data` | Compose reutiliza el volumen nombrado al hacer `up` |
+| Orden manual red → volumen → db → api → frontend | `depends_on` con `condition: service_healthy` |
+| Espera manual a *Waiting for connections* | Healthcheck de `catalogo-db` + dependencia condicionada |
+| Recordar el orden en la cabeza de quien levanta | El orden vive en el archivo versionado del repositorio |
+| `docker build` como paso separado previo | `docker compose up --build` construye e levanta junto |
+| Credenciales en claro en la línea de comando | `.env` (ignorado por git) + `.env.example` documentado |
+| Cuatro o más comandos sueltos en la terminal | Un `docker compose up -d` para todo el stack |
+| `docker rm -f` / `docker network rm` entre pruebas | `docker compose down` (y `down -v` si se quiere borrar datos) |
+
+### Qué apareció
+
+| Nuevo en Compose | Para qué sirve |
+| --- | --- |
+| `healthcheck` en los tres servicios | Define cuándo un servicio está realmente listo (`healthy`) |
+| `depends_on` + `condition: service_healthy` | Encadena db → api → frontend sin intervención manual |
+| Bloques `networks:` y `volumes:` de nivel superior | Mismos nombres que la semana 3, declarados una sola vez |
+| `build.context` en api y frontend | Fuente única de verdad para construir imágenes propias |
+| `.env` / `.env.example` | Contrato de variables; contraseñas fuera del repositorio |
+| `cap_drop: [ALL]` en los tres servicios | Mínimo privilegio a nivel de capabilities |
+| `cap_add` en `catalogo-db` | Solo las cinco capabilities que MongoDB necesita para arrancar |
+| `docker compose config` | Validar el archivo antes de levantar |
+| `docker compose ps` con columna de salud | Ver `(healthy)` / `(unhealthy)` de un vistazo |
+| Escaneo Trivy documentado | Revisión de vulnerabilidades de las imágenes propias |
+
+### Resumen
+
+La semana 3 demostró que el stack **funciona**; la semana 4 lo **declara**. Lo
+que desaparece es la fricción operativa — comandos sueltos, orden en memoria,
+esperas manuales y credenciales en la terminal. Lo que aparece es
+orquestación declarativa, salud verificable, dependencias condicionadas,
+seguridad básica (`cap_drop`/`cap_add`) y un archivo que en la semana 5 se
+traducirá a manifiestos de Kubernetes.
