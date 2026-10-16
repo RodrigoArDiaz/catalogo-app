@@ -345,3 +345,92 @@ La API acepta `MONGO_URI` como alternativa a `DB_HOST`, `DB_PORT`, `DB_NAME`,
 `DB_USER` y `DB_PASSWORD`. Esa cadena incluye la contraseña en texto plano; en
 Kubernetes (semana 7) debe ubicarse completa en un **Secret**, nunca en un
 ConfigMap.
+
+## Revisión de seguridad (Trabajo Practico Nº 4 - Ejercicio 10)
+
+Comandos utilizados:
+
+```bash
+docker compose exec catalogo-api id
+docker compose exec catalogo-frontend id
+docker compose ps
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy image catalogo-api:v1
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy image catalogo-frontend:v1
+```
+
+### a) Usuario de ejecución
+
+| Servicio | Comando | Usuario (uid) | ¿Distinto de root? |
+| --- | --- | --- | --- |
+| `catalogo-api` | `docker compose exec catalogo-api id` | `appuser` (uid 1000) | Sí — definido con `USER appuser` en el Dockerfile |
+| `catalogo-frontend` | `docker compose exec catalogo-frontend id` | `nginx` (uid 101) | Sí — imagen `nginxinc/nginx-unprivileged` |
+| `catalogo-db` | — | `mongodb` (uid 999) | Referencia — imagen oficial; arranca como root y baja de privilegios |
+
+Salida esperada de las dos imágenes propias:
+
+```
+# catalogo-api
+uid=1000(appuser) gid=1000(appuser) groups=1000(appuser)
+
+# catalogo-frontend
+uid=101(nginx) gid=101(nginx) groups=101(nginx)
+```
+
+### b) Puertos publicados (`docker compose ps`)
+
+| Servicio | Puertos en `docker compose ps` | ¿Publicado en el host? |
+| --- | --- | --- |
+| `catalogo-db` | `27017/tcp` (sin flecha) | **No** — solo alcanzable desde `catalogo-net` |
+| `catalogo-api` | `0.0.0.0:8000->8000/tcp` | Sí — solo depuración |
+| `catalogo-frontend` | `0.0.0.0:3000->8080/tcp` | Sí — único punto de entrada |
+
+### c) Puerto 8000 de la API
+
+`catalogo-api` publica `8000:8000` únicamente para depurar con `curl` directo
+(`localhost:8000/health`). En producción el navegador entra por
+`localhost:3000/api/...` vía nginx. En la semana 6, al traducir el stack a
+Kubernetes, ese puerto dejará de publicarse en el host y la API pasará a ser un
+Service interno del clúster.
+
+### d) Escaneo de vulnerabilidades (Trivy)
+
+Comando (escaneos del 2026-10-15 y 2026-10-16; la primera corrida descarga la
+base de datos de Trivy ~128 MB):
+
+```bash
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy image catalogo-api:v1
+
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  aquasec/trivy image catalogo-frontend:v1
+```
+
+| Imagen | Origen | Hallazgos | Con parche (Fixed Version) |
+| --- | --- | --- | --- |
+| `catalogo-api:v1` | Sistema base (Debian 13.7, heredado de `python:3.12-slim`) | 166 · 0 CRITICAL, 44 HIGH, 58 MEDIUM, 61 LOW, 3 UNKNOWN | 1 |
+| `catalogo-api:v1` | Dependencias Python (`pip`, `pymongo`, `starlette`) | 17 · 0 CRITICAL, 5 HIGH, 10 MEDIUM, 2 LOW | 17 |
+| `catalogo-frontend:v1` | Sistema base (Alpine 3.21.3, `nginxinc/nginx-unprivileged:1.27-alpine`) | 159 · 2 CRITICAL, 39 HIGH, 76 MEDIUM, 42 LOW | 159 |
+
+Desglose de las dependencias Python en `catalogo-api:v1`:
+
+| Paquete | Hallazgos | Ejemplos con parche disponible |
+| --- | --- | --- |
+| `pip` 25.0.1 | 6 | actualizar a ≥ 26.1.2 |
+| `pymongo` 4.8.0 | 4 | actualizar a ≥ 4.18.2 |
+| `starlette` 0.38.6 | 7 | actualizar a ≥ 1.3.1 |
+
+En el sistema base Debian de la API, casi ningún hallazgo trae *Fixed Version* en
+Trivy (1 de 166: `liblzma5` → `5.8.1-1+deb13u2`); en cambio las 17 CVE de
+Python sí indican versión corregida. En el frontend, los 159 hallazgos provienen
+solo del sistema base Alpine (sin dependencias de aplicación escaneadas) y
+todos tienen *Fixed Version* — por ejemplo OpenSSL 3.3.3-r0 → 3.3.7-r2,
+BusyBox 1.37.0-r12 → 1.37.0-r14, zlib 1.3.1-r2 → 1.3.2-r1. Eso coincide con
+el contraste del curso: en la API hay pocos parches aplicables hoy en el OS, pero
+sí listados en pip/pymongo/starlette; en el frontend la base Alpine quedó vieja
+y se arregla reconstruyendo sobre una imagen padre más nueva.
+
+En la tabla de Trivy, la columna **Fixed Version** indica si existe versión
+corregida. El objetivo no es llegar a cero CVE, sino saber qué hay y haber
+decidido qué aceptar, mitigar o actualizar.
