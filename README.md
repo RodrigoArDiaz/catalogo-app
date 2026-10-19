@@ -646,3 +646,105 @@ esperas manuales y credenciales en la terminal. Lo que aparece es
 orquestación declarativa, salud verificable, dependencias condicionadas,
 seguridad básica (`cap_drop`/`cap_add`) y un archivo que en la semana 5 se
 traducirá a manifiestos de Kubernetes.
+
+## Imágenes en el clúster e ImagePullBackOff (Trabajo Práctico Nº 5 - Ejercicio 1)
+
+El clúster de Kubernetes corre en otra máquina y no utiliza la caché de
+imágenes del Docker Engine local. Las imágenes propias deben publicarse en un
+registry y nombrarse de forma completa en los manifiestos.
+
+### Publicación en Docker Hub
+
+Las imágenes ya estaban publicadas desde el Trabajo Práctico Nº 2:
+
+- [diazrodrigoar/catalogo-api:v1](https://hub.docker.com/repository/docker/diazrodrigoar/catalogo-api/tags/v1)
+- [diazrodrigoar/catalogo-frontend:v1](https://hub.docker.com/repository/docker/diazrodrigoar/catalogo-frontend/tags/v1)
+
+Comandos equivalentes a los del enunciado:
+
+```bash
+docker login
+docker tag catalogo-api:v1       diazrodrigoar/catalogo-api:v1
+docker tag catalogo-frontend:v1 diazrodrigoar/catalogo-frontend:v1
+docker push diazrodrigoar/catalogo-api:v1
+docker push diazrodrigoar/catalogo-frontend:v1
+```
+
+En los manifiestos de esta entrega se usa el nombre completo
+`diazrodrigoar/<imagen>:v1`. Sin el prefijo del usuario, el kubelet busca en
+Docker Hub una imagen **oficial** con ese nombre — que no existe.
+
+### Error deliberado: imagen sin usuario del registry
+
+Se creó un Pod de prueba con la imagen mal nombrada:
+
+```bash
+kubectl run catalogo-api-pull-test \
+  --image=catalogo-api:v1 \
+  -n default
+```
+
+Salida de `kubectl describe pod catalogo-api-pull-test -n default`:
+
+```
+Name:             catalogo-api-pull-test
+Namespace:        default
+Priority:         0
+Service Account:  default
+Node:             rdiaz/172.16.20.15
+Start Time:       Sun, 18 Oct 2026 22:28:20 -0300
+Labels:           run=catalogo-api-pull-test
+Annotations:      <none>
+Status:           Pending
+IP:               10.244.0.7
+IPs:
+  IP:  10.244.0.7
+Containers:
+  catalogo-api-pull-test:
+    Container ID:
+    Image:          catalogo-api:v1
+    Image ID:
+    Port:           <none>
+    Host Port:      <none>
+    State:          Waiting
+      Reason:       ImagePullBackOff
+    Ready:          False
+    Restart Count:  0
+    Environment:    <none>
+    Mounts:
+      /var/run/secrets/kubernetes.io/serviceaccount from kube-api-access-bkn7j (ro)
+Events:
+  Type     Reason     Age                  From               Message
+  ----     ------     ----                 ----               -------
+  Normal   Scheduled  11m                  default-scheduler  Successfully assigned default/catalogo-api-pull-test to rdiaz
+  Normal   Pulling    8m31s (x5 over 11m)  kubelet            spec.containers{catalogo-api-pull-test}: Pulling image "catalogo-api:v1"
+  Warning  Failed     8m30s (x5 over 11m)  kubelet            spec.containers{catalogo-api-pull-test}: Failed to pull image "catalogo-api:v1": failed to pull and unpack image "docker.io/library/catalogo-api:v1": failed to resolve reference "docker.io/library/catalogo-api:v1": pull access denied, repository does not exist or may require authorization: server message: insufficient_scope: authorization failed
+  Warning  Failed     8m30s (x5 over 11m)  kubelet            spec.containers{catalogo-api-pull-test}: Error: ErrImagePull
+  Normal   BackOff    86s (x43 over 11m)   kubelet            spec.containers{catalogo-api-pull-test}: Back-off pulling image "catalogo-api:v1"
+  Warning  Failed     86s (x43 over 11m)   kubelet            spec.containers{catalogo-api-pull-test}: Error: ImagePullBackOff
+```
+
+### Diagnóstico
+
+| Dato | Valor |
+| --- | --- |
+| Estado del contenedor | `Waiting` → `Reason: ImagePullBackOff` |
+| Imagen declarada en el manifiesto | `catalogo-api:v1` |
+| Imagen que intentó descargar el kubelet | `catalogo-api:v1` → resuelta como `docker.io/library/catalogo-api:v1` |
+| Mensaje clave en Events | `Failed to pull image "catalogo-api:v1"` · `Error: ErrImagePull` · `Error: ImagePullBackOff` |
+| Imagen correcta | `diazrodrigoar/catalogo-api:v1` |
+
+El contenedor nunca arrancó: `Container ID` e `Image ID` están vacíos y
+`kubectl logs` no devuelve nada. La causa se lee en los **Events** de
+`kubectl describe`: el kubelet resolvió `catalogo-api:v1` como imagen oficial
+de Docker Hub (`docker.io/library/...`) y no la encontró.
+
+Este error es distinto del `CrashLoopBackOff` de la consigna 5: aquí la imagen
+no se descarga; allí la imagen sí baja pero la aplicación falla al ejecutarse
+(por ejemplo, porque `DB_HOST=catalogo-db` no resuelve sin un Service).
+
+Limpieza del Pod de prueba:
+
+```bash
+kubectl delete pod catalogo-api-pull-test -n default
+```
