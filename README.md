@@ -1000,3 +1000,69 @@ Diez comandos usados en esta entrega sobre el namespace `catalogo-app`:
 | 8 | `kubectl logs catalogo-api -n catalogo-app --previous` | Leer logs del contenedor anterior tras un crash; diagnóstico del ejercicio 5 (`ServerSelectionTimeoutError`). |
 | 9 | `kubectl delete pod catalogo-api -n catalogo-app` | Borrar un Pod suelto; comprobar en el ejercicio 9 que nadie lo recrea. También necesario antes de recrear un Pod cuyo spec no admite cambios in-place. |
 | 10 | `kubectl port-forward pod/catalogo-api 8000:8000 -n catalogo-app` | Túnel local al Pod para probar `/health` y `/productos` sin Service (ejercicio 8). |
+
+## De `docker-compose.yml` a tres manifiestos de Pod (Trabajo Práctico Nº 5 - Ejercicio 11)
+
+El `docker-compose.yml` de la semana 4 levanta el stack completo con un
+comando. Esta entrega lo traduce a tres Pods sueltos en el namespace
+`catalogo-app`, **sin** Deployments ni Services — a propósito, para observar
+qué deja de funcionar.
+
+### Qué se conserva (misma arquitectura, otro formato)
+
+| `docker-compose.yml` (semana 4) | Manifiestos K8s (`k8s/pod-*.yaml`) |
+| --- | --- |
+| Tres servicios: `catalogo-db`, `catalogo-api`, `catalogo-frontend` | Tres Pods con los mismos nombres |
+| `image: mongo:7` | `image: mongo:7` en `pod-catalogo-db.yaml` |
+| Imágenes propias `catalogo-api:v1`, `catalogo-frontend:v1` | `diazrodrigoar/catalogo-api:v1`, `diazrodrigoar/catalogo-frontend:v1` (nombre completo de registry) |
+| `MONGO_INITDB_ROOT_*` | Mismas variables en el Pod de MongoDB |
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `APP_VERSION`, `ROOT_PATH`, `SEED_DEMO` | Idem en `pod-catalogo-api.yaml` |
+| `API_HOST`, `API_PORT` | Idem en `pod-catalogo-frontend.yaml` |
+| Puerto interno 27017 / 8000 / 8080 | `containerPort` equivalente en cada Pod |
+| Sin `-p` en la base | Sin publicación de puertos en el host en `catalogo-db` |
+| Nombres lógicos `catalogo-db`, `catalogo-api` | Mismos strings en variables de entorno |
+
+Las tres capas, imágenes, variables y puertos internos son los mismos; cambió
+la notación (`services`/`environment` → `kind: Pod`/`spec.containers`) y el
+runtime (Docker Engine local → clúster Kubernetes).
+
+### Qué desapareció
+
+| En Compose (semana 4) | En Pods sueltos (semana 5) | Efecto |
+| --- | --- | --- |
+| Un solo archivo `docker-compose.yml` | Tres manifiestos en `k8s/` | Hay que aplicar cada Pod por separado |
+| `docker compose up -d` | `kubectl apply -f` por archivo + orden manual db → api → frontend | Sin orquestador que encadene el arranque |
+| `networks: catalogo-net` | (implícito: red del CNI del clúster) | Los nombres **no** resuelven como en Docker DNS |
+| `depends_on` + `condition: service_healthy` | Nada equivalente | La API puede arrancar antes que MongoDB; el frontend antes que la API |
+| `healthcheck` en los tres servicios | Sin `livenessProbe` / `readinessProbe` | `Running` no implica listo para recibir tráfico |
+| `volumes: catalogo-db-data` | Sin volumen persistente | Los datos de MongoDB se pierden al borrar el Pod |
+| `ports: "3000:8080"` / `"8000:8000"` | Solo `containerPort` | Nada publicado al host; acceso vía `port-forward` puntual |
+| `build:` + `image:` local | Solo `image:` con registry remoto | Hay que `docker push` antes de desplegar |
+| `.env` + `${VAR}` | Valores literales en el YAML | Credenciales visibles en el manifiesto |
+| `cap_drop` / `cap_add` | Sin securityContext de capabilities | Capabilities de la semana 4 no trasladadas |
+| `docker compose down` / `ps` | `kubectl delete pod` / `get pods` | Pods borrados no vuelven solos (ejercicio 9) |
+| Resolución DNS entre servicios | — | `DB_HOST=catalogo-db` y `API_HOST=catalogo-api` **fallan** sin Service |
+
+### Qué todavía falta (deliberadamente — semanas 6 y 7)
+
+| Pieza ausente | Qué resolvía en Compose | Cuándo entra en el curso |
+| --- | --- | --- |
+| **Service** | Nombre estable y DNS entre contenedores (`catalogo-db`, `catalogo-api`) | Semana 6 |
+| **Deployment** / **ReplicaSet** | Recrear Pods caídos o borrados; declarar cuántas réplicas | Semana 6 |
+| **PersistentVolume** + claim | `catalogo-db-data` — datos que sobreviven al reinicio | Semana 7 |
+| **Secret** | Credenciales fuera del YAML plano (`DB_PASSWORD`, `MONGO_INITDB_*`) | Semana 7 |
+| **ConfigMap** | Variables no sensibles separadas del Pod | Semana 7 |
+| **Ingress** (o NodePort) | Publicar el frontend en `:3000` como `ports:` en Compose | Semana 7 |
+| **Probes** | Sustituto de `healthcheck` + `depends_on: service_healthy` | Semana 6–7 |
+| **Namespace** `catalogo-app` | Aislamiento lógico del proyecto | Ya creado; los Services vivirán ahí |
+
+### Resumen
+
+La semana 4 **declara y encadena** el stack en un host Docker. La semana 5
+**replica la forma** (tres capas, mismas variables) pero en Pods sueltos sobre
+un clúster: desaparecen red nombrada, dependencias, healthchecks, volúmenes,
+publicación de puertos y construcción local; aparecen namespace, manifiestos
+YAML, registry remoto y `kubectl`. Lo que **todavía falta** — Services,
+Deployments, almacenamiento, Secrets e Ingress — es exactamente lo que explica
+por qué esta entrega falla en DNS, IPs efímeras y Pods que nadie recrea, y lo
+que la semana 6 en adelante va a agregar.
