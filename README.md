@@ -880,3 +880,73 @@ El patrón es el mismo que en los ejercicios 5 y 6 de esta entrega:
 `DB_HOST=catalogo-db` falla por DNS hacia la base; `API_HOST=catalogo-api`
 falla por DNS hacia la API. En Compose esos nombres los resuelve la red;
 en Kubernetes los reemplazan los **Services**.
+
+## Acceso a la API con port-forward (Trabajo Práctico Nº 5 - Ejercicio 8)
+
+Sin Service, se accede al Pod concreto mediante un túnel local:
+
+```bash
+kubectl port-forward pod/catalogo-api 8000:8000 -n catalogo-app
+```
+
+En otra terminal:
+
+```bash
+curl -s localhost:8000/health
+curl -s localhost:8000/productos
+```
+
+Salida de `/health`:
+
+```json
+{"status":"ok","db":"ok","version":"v1"}
+```
+
+Salida de `/productos` (truncada):
+
+```json
+[{"sku":999666,"categoria":"Apple",...,"nombre":"Apple iPhone 6 (Gold, 32 GB)",...}]
+```
+
+### `/docs` y `ROOT_PATH=/api`
+
+El enunciado plantea comprobar `http://localhost:8000/docs` y explicar el
+efecto de `ROOT_PATH=/api` (decisión de la semana 3) cuando no hay proxy nginx
+delante.
+
+Swagger UI necesita un JSON de especificación (“la spec”) para dibujar los
+endpoints. Con `ROOT_PATH=/api`, la página `/docs` pide esa spec en
+`/api/openapi.json`:
+
+```javascript
+const ui = SwaggerUIBundle({ url: '/api/openapi.json', ... })
+```
+
+El enunciado describe el caso en que esa URL **no existiría** (404): la
+página HTML cargaría, pero Swagger quedaría vacío. En esta variante, con
+**FastAPI 0.115.0**, la spec **sí** responde bajo `/api/openapi.json`:
+
+| URL | HTTP | Qué es |
+| --- | --- | --- |
+| `/docs` | 200 | HTML de Swagger UI |
+| `/api/openapi.json` | 200 | Spec que Swagger consume |
+| `/openapi.json` | 200 | Misma spec, ruta alternativa |
+| `/api/docs` | 200 | Swagger UI bajo el prefijo `/api` |
+
+En el navegador, `http://localhost:8000/docs` carga la interfaz completa: los
+ocho endpoints aparecen y “Try it out” sobre `/health` responde
+`{"status":"ok","db":"ok","version":"v1"}`.
+
+`ROOT_PATH=/api` sigue indicando que la API está **diseñada** para publicarse
+detrás del frontend nginx bajo `/api/...` (semana 3, ejercicio 7). En
+producción el navegador entra por `localhost:3000/api/...`, no por el puerto
+8000 expuesto. El acceso directo con `port-forward` es una excepción de
+depuración.
+
+### port-forward es depuración, no publicación
+
+`kubectl port-forward` abre un túnel desde la máquina local hacia **un Pod
+concreto**. No crea DNS en el clúster, no balancea carga, no sobrevive a un
+reinicio del Pod (hay que relanzar el comando) y no reemplaza a un **Service**
+ni a un **Ingress**. Sirve para probar `/health` y `/productos` durante el
+desarrollo; no es un mecanismo de publicación.
