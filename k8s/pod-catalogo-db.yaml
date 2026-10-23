@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: catalogo-db
+  namespace: catalogo-app
+  labels:
+    run: catalogo-db
+spec:
+  containers:
+    - name: catalogo-db
+      image: mongo:7
+      ports:
+        - containerPort: 27017
+      env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          value: catalogo_user
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          value: catalogo_pass
+  restartPolicy: Always
