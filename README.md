@@ -783,3 +783,58 @@ En Kubernetes un Pod no expone nombre DNS a otros Pods. Ese nombre lo provee un
 **Service**, que en esta entrega no existe. Sin Service, `DB_HOST=catalogo-db`
 no es alcanzable aunque el Pod `catalogo-db` esté `Running` en
 `10.244.0.11`.
+
+## API por dirección IP del Pod (Trabajo Práctico Nº 5 - Ejercicio 6)
+
+Como un Pod existente no admite cambiar variables de entorno con
+`kubectl apply`, se recreó `catalogo-api` tras editar el manifiesto:
+
+```yaml
+- name: DB_HOST
+  value: "10.244.0.11"
+```
+
+### Funcionamiento temporal con IP
+
+| Pod | IP asignada |
+| --- | --- |
+| `catalogo-db` | `10.244.0.11` |
+| `catalogo-api` | `10.244.0.12` |
+
+Con `DB_HOST` apuntando a la IP del Pod de MongoDB, la API alcanzó `Running`
+y en los logs apareció `conexión a MongoDB establecida`. Eso confirma que el
+fallo del ejercicio 5 no era MongoDB ni las credenciales, sino la resolución
+de nombres: por TCP directo a la IP sí se llega.
+
+### Recreación de la base y nueva IP
+
+Se eliminó y volvió a crear `catalogo-db` con el mismo manifiesto:
+
+```bash
+kubectl delete pod catalogo-db -n catalogo-app
+kubectl apply -f k8s/pod-catalogo-db.yaml
+```
+
+El Pod nuevo recibió otra IP:
+
+| Pod | IP antes | IP después |
+| --- | --- | --- |
+| `catalogo-db` | `10.244.0.11` | `10.244.0.15` |
+
+El manifiesto de la API siguió con `DB_HOST=10.244.0.11`. Tras recrear
+`catalogo-api`, el Pod entró en ciclos `Running` → `Error` →
+`CrashLoopBackOff`: en cada arranque `esperar_mongo()` agota los reintentos
+contra una IP que ya no corresponde al Pod de MongoDB.
+
+### Conclusión
+
+La dirección IP de un Pod es **descartable** (efímera): Kubernetes la asigna
+al crear el Pod y no la conserva si el Pod se elimina y se vuelve a crear.
+Hardcodear `DB_HOST` con una IP parece una solución al ejercicio 5, pero deja
+la configuración amarrada a un identificador que cambia en cuanto la base se
+recrea o se reprograma en otro nodo.
+
+Por eso existen los **Services**: ofrecen un nombre DNS estable
+(`catalogo-db`) que apunta al Pod correcto aunque este cambie de IP o se
+reemplace. Hasta que exista ese Service, el manifiesto de la API queda con
+`DB_HOST=10.244.0.11` — una IP obsoleta — de forma deliberada.
