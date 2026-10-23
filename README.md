@@ -950,3 +950,36 @@ concreto**. No crea DNS en el clúster, no balancea carga, no sobrevive a un
 reinicio del Pod (hay que relanzar el comando) y no reemplaza a un **Service**
 ni a un **Ingress**. Sirve para probar `/health` y `/productos` durante el
 desarrollo; no es un mecanismo de publicación.
+
+## Pods sin controller (Trabajo Práctico Nº 5 - Ejercicio 9)
+
+Se eliminó el Pod de la API con:
+
+```bash
+kubectl delete pod catalogo-api -n catalogo-app
+kubectl get pods -n catalogo-app
+```
+
+Salida posterior — `catalogo-api` ya no figura en la lista:
+
+```
+NAME                READY   STATUS             RESTARTS        AGE
+catalogo-db         1/1     Running            0               53m
+catalogo-frontend   0/1     CrashLoopBackOff   30 (5m3s ago)   142m
+```
+
+Ningún componente del clúster lo recreó. Tras varios minutos, `kubectl get
+pods -w` sigue sin mostrar un Pod `catalogo-api` nuevo.
+
+### Qué demuestra
+
+| Acción | Pod suelto (esta entrega) | Deployment (semana 6) |
+| --- | --- | --- |
+| `kubectl delete pod` | Desaparece y **no vuelve** | Un controller lo **recrea** |
+| Contenedor crashea dentro del Pod | `restartPolicy: Always` lo reinicia **en el mismo Pod** | Igual, pero además el Deployment mantiene la cantidad deseada |
+| ¿Quién vigila la réplica? | **Nadie** | ReplicaSet / Deployment |
+
+Un Pod suelto es **mortal**: si se borra, desaparece hasta que alguien vuelva
+a aplicar el manifiesto (`kubectl apply -f k8s/pod-catalogo-api.yaml`). Ese
+hecho es el punto de partida de la clase siguiente, donde un **Deployment**
+declara cuántas copias deben existir y un controller las sostiene.
