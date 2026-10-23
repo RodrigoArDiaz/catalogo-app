@@ -748,3 +748,38 @@ Limpieza del Pod de prueba:
 ```bash
 kubectl delete pod catalogo-api-pull-test -n default
 ```
+
+
+## CrashLoopBackOff de catalogo-api (Trabajo Práctico Nº 5 - Ejercicio 5)
+
+La API queda en `CrashLoopBackOff` con `Exit Code: 3` tras 10 reinicios.
+En el manifiesto figura `DB_HOST=catalogo-db`, igual que en Docker Compose.
+
+### kubectl logs catalogo-api --previous
+
+Tras 10 reintentos de `esperar_mongo()`, pymongo lanza:
+
+    pymongo.errors.ServerSelectionTimeoutError: catalogo-db:27017: [Errno -2] Name or service not known
+
+En cada intento previo aparece el mismo síntoma:
+
+    intento N/10 de conexión falló: catalogo-db:27017: [Errno -2] Name or service not known
+
+La aplicación termina con `Application startup failed. Exiting.`
+
+### Tipo de error
+
+- **Observado:** `ServerSelectionTimeoutError`
+- **No observado:** `Authentication failed`
+
+`ServerSelectionTimeoutError` indica que pymongo no pudo conectar con ningún
+servidor MongoDB: el hostname `catalogo-db` no resuelve en el DNS del clúster.
+`Authentication failed` implicaría que la conexión TCP sí llegó a MongoDB y el
+rechazo fue de credenciales; eso no ocurre aquí.
+
+### Causa
+
+En Kubernetes un Pod no expone nombre DNS a otros Pods. Ese nombre lo provee un
+**Service**, que en esta entrega no existe. Sin Service, `DB_HOST=catalogo-db`
+no es alcanzable aunque el Pod `catalogo-db` esté `Running` en
+`10.244.0.11`.
