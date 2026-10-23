@@ -838,3 +838,45 @@ Por eso existen los **Services**: ofrecen un nombre DNS estable
 (`catalogo-db`) que apunta al Pod correcto aunque este cambie de IP o se
 reemplace. Hasta que exista ese Service, el manifiesto de la API queda con
 `DB_HOST=10.244.0.11` — una IP obsoleta — de forma deliberada.
+
+## Frontend: host not found in upstream (Trabajo Práctico Nº 5 - Ejercicio 7)
+
+Tras aplicar `k8s/pod-catalogo-frontend.yaml`, el Pod queda en
+`CrashLoopBackOff`. El manifiesto declara `API_HOST=catalogo-api` y
+`API_PORT=8000`, igual que en la semana 3.
+
+### kubectl logs catalogo-frontend -n catalogo-app
+
+```
+/docker-entrypoint.sh: Configuration complete; ready for start up
+2026/10/23 03:26:27 [emerg] 1#1: host not found in upstream "catalogo-api" in /etc/nginx/conf.d/default.conf:24
+nginx: [emerg] host not found in upstream "catalogo-api" in /etc/nginx/conf.d/default.conf:24
+```
+
+nginx resuelve `${API_HOST}` **una sola vez al arrancar** (ver
+`frontend/nginx/templates/default.conf.template`). Si el nombre no existe en
+el DNS del clúster, el proceso termina con código 1 y el kubelet reinicia el
+contenedor.
+
+### Comparación con la semana 3
+
+Es la **tercera vez** en el curso que aparece este mensaje; el texto es
+idéntico, la causa no.
+
+| Aspecto | Semana 3 | Semana 5 (Kubernetes) |
+| --- | --- | --- |
+| Mensaje | `host not found in upstream "catalogo-api"` | Igual |
+| Variable | `API_HOST=catalogo-api` | `API_HOST=catalogo-api` |
+| Causa | **Faltaba la red**: el contenedor no estaba en `catalogo-net`, o arrancó antes de que `catalogo-api` existiera en esa red (ejercicios 5 y 9) | **Falta el Service**: un Pod suelto no registra nombre DNS en CoreDNS |
+| Quién resuelve el nombre | DNS embebido de Docker en la red custom | CoreDNS, registros de **Services** (`*.svc.cluster.local`) |
+| Solución en el curso | `--network catalogo-net` + orden de arranque / `depends_on` en Compose | **Service** que apunte al Pod de la API (semana 6) |
+
+En Docker, si ambos contenedores comparten `catalogo-net`, el nombre
+`catalogo-api` resuelve. En Kubernetes el manifiesto usa el mismo
+`API_HOST`, pero sin Service el nombre no existe aunque el Pod
+`catalogo-api` esté `Running`: CoreDNS no crea registros para Pods sueltos.
+
+El patrón es el mismo que en los ejercicios 5 y 6 de esta entrega:
+`DB_HOST=catalogo-db` falla por DNS hacia la base; `API_HOST=catalogo-api`
+falla por DNS hacia la API. En Compose esos nombres los resuelve la red;
+en Kubernetes los reemplazan los **Services**.
