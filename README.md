@@ -983,3 +983,20 @@ Un Pod suelto es **mortal**: si se borra, desaparece hasta que alguien vuelva
 a aplicar el manifiesto (`kubectl apply -f k8s/pod-catalogo-api.yaml`). Ese
 hecho es el punto de partida de la clase siguiente, donde un **Deployment**
 declara cuántas copias deben existir y un controller las sostiene.
+
+## Cheatsheet kubectl — Trabajo Práctico Nº 5 (Ejercicio 10)
+
+Diez comandos usados en esta entrega sobre el namespace `catalogo-app`:
+
+| # | Comando | Para qué lo usé |
+| --- | --- | --- |
+| 1 | `kubectl config current-context` | Verificar en qué clúster opero antes de aplicar manifiestos (ejercicio 2). |
+| 2 | `kubectl config set-context --current --namespace=catalogo-app` | Fijar `catalogo-app` como namespace por defecto; evita olvidar `-n` en cada comando. |
+| 3 | `kubectl run catalogo-db --image=mongo:7 --dry-run=client -o yaml` | Generar el YAML base del Pod de MongoDB sin crearlo aún; la salida se guardó en `k8s/pod-catalogo-db.yaml`. |
+| 4 | `kubectl apply -f k8s/pod-catalogo-db.yaml` | Crear o actualizar recursos declarados en un manifiesto (los tres Pods de esta entrega). |
+| 5 | `kubectl get pods -n catalogo-app -o wide` | Listar Pods con IP, nodo y estado; registrar direcciones en el ejercicio 4. |
+| 6 | `kubectl get pods -n catalogo-app -w` | Observar en vivo transiciones de estado (`ContainerCreating`, `Running`, `CrashLoopBackOff`). |
+| 7 | `kubectl describe pod catalogo-api -n catalogo-app` | Ver Events y motivo de fallo (`ImagePullBackOff`, `CrashLoopBackOff`, variables de entorno). |
+| 8 | `kubectl logs catalogo-api -n catalogo-app --previous` | Leer logs del contenedor anterior tras un crash; diagnóstico del ejercicio 5 (`ServerSelectionTimeoutError`). |
+| 9 | `kubectl delete pod catalogo-api -n catalogo-app` | Borrar un Pod suelto; comprobar en el ejercicio 9 que nadie lo recrea. También necesario antes de recrear un Pod cuyo spec no admite cambios in-place. |
+| 10 | `kubectl port-forward pod/catalogo-api 8000:8000 -n catalogo-app` | Túnel local al Pod para probar `/health` y `/productos` sin Service (ejercicio 8). |
