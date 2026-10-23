@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: catalogo-frontend
+  namespace: catalogo-app
+  labels:
+    run: catalogo-frontend
+spec:
+  containers:
+    - name: catalogo-frontend
+      image: diazrodrigoar/catalogo-frontend:v1
+      ports:
+        - containerPort: 8080
+      env:
+        - name: API_HOST
+          value: catalogo-api
+        - name: API_PORT
+          value: "8000"
+  restartPolicy: Always
