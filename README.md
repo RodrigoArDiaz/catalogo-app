@@ -1144,3 +1144,40 @@ El Service de producción hacia la API sigue siendo **`catalogo-api`**
 no forma parte del chart de la semana 8: existe **solo con fines de
 depuración** (probar `/health`, `/productos` y balanceo entre réplicas sin
 pasar por nginx).
+
+## Autorreparación del Deployment (Trabajo Práctico Nº 6 - Ejercicio 6)
+
+Con la aplicación abierta en `http://172.16.20.15:30302` y dos réplicas de la
+API (`deploy-catalogo-api.yaml`), se eliminó **una** réplica por nombre:
+
+```bash
+kubectl get pods -n catalogo-app -l app=catalogo-api
+kubectl delete pod <nombre-de-una-replica> -n catalogo-app
+kubectl get pods -n catalogo-app -l app=catalogo-api -w
+```
+
+Secuencia observada con `kubectl get pods -w`:
+
+1. El Pod borrado pasa a `Terminating` y desaparece.
+2. El ReplicaSet del Deployment crea un Pod nuevo (nombre distinto, mismo
+   prefijo `catalogo-api-<hash>-`).
+3. Tras `ContainerCreating`, el reemplazo alcanza `Running` / `1/1`.
+4. Siguen existiendo **dos** Pods con label `app=catalogo-api`.
+
+El Service `catalogo-api` mantiene dos direcciones en ENDPOINTS: mientras al
+menos una réplica esté **Ready**, el frontend en `:30302` sigue respondiendo;
+no fue necesario volver a aplicar manifiestos.
+
+### Contraste con la semana 5
+
+| | Semana 5 (Pod suelto) | Semana 6 (Deployment) |
+| --- | --- | --- |
+| Comando | `kubectl delete pod catalogo-api -n catalogo-app` | `kubectl delete pod <una réplica> -n catalogo-app` |
+| Después del delete | El Pod **no** vuelve (ejercicio 9, semana 5) | El Deployment **recrea** la réplica |
+| Quién actúa | Nadie | ReplicaSet / Deployment |
+| Estado deseado | No declarado | `replicas: 2` en el manifiesto |
+| Efecto en la app | La API desaparece hasta un `kubectl apply` manual | La otra réplica + el Service siguen atendiendo |
+
+En la semana 5 un Pod suelto era **mortal**. En la semana 6 el clúster
+**sostiene** el número de réplicas: borrar un Pod es un incidente que el
+controlador corrige, no un estado final.
