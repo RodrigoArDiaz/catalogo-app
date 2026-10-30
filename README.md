@@ -1109,3 +1109,38 @@ estabilizan.
 En clústeres 1.33+ conviene corroborar con
 `kubectl get endpointslices -n catalogo-app` si aparece el warning de
 deprecación; las direcciones deben coincidir con las de `get endpoints`.
+
+## Acceso a la aplicación por NodePort (Trabajo Práctico Nº 6 - Ejercicio 4)
+
+La aplicación se abre en el NodePort del frontend (`30302`), usando la
+**INTERNAL-IP** del nodo (no `localhost`):
+
+```text
+http://172.16.20.15:30302
+```
+
+Desde ahí se cargó un producto con imagen; el tráfico recorre nginx → Service
+`catalogo-api` → MongoDB vía Service `catalogo-db`.
+
+## Service NodePort de depuración para la API (Trabajo Práctico Nº 6 - Ejercicio 5)
+
+Objeto adicional en `k8s/svc-catalogo-api-nodeport.yaml`: expone la API
+directamente en el puerto **30502** del nodo, con el mismo selector
+`app: catalogo-api` que el ClusterIP de producción interna.
+
+```bash
+kubectl apply -f k8s/svc-catalogo-api-nodeport.yaml
+curl -s http://172.16.20.15:30502/health
+```
+
+Respuesta esperada (ejemplo):
+
+```json
+{"status":"ok","db":"ok","version":"v1"}
+```
+
+El Service de producción hacia la API sigue siendo **`catalogo-api`**
+(ClusterIP): solo la consume el frontend dentro del clúster. **`catalogo-api-nodeport`**
+no forma parte del chart de la semana 8: existe **solo con fines de
+depuración** (probar `/health`, `/productos` y balanceo entre réplicas sin
+pasar por nginx).
