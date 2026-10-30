@@ -1275,3 +1275,95 @@ igual (comportamiento esperado del enunciado).
 
 Si la actualización falla por imagen, las réplicas en v1 siguen sirviendo;
 `kubectl rollout undo` revierte al ReplicaSet anterior.
+
+## Escalar la API y estado sin disco local (Trabajo Práctico Nº 6 - Ejercicio 8)
+
+El Service `catalogo-api-nodeport` (puerto **30502**) balancea entre **todas**
+las réplicas del Deployment con label `app=catalogo-api`. Al escalar, Kubernetes
+añade Pods; el Endpoints / EndpointSlice del Service incorpora sus IPs sin
+cambiar el manifiesto del Service.
+
+### Escalar a tres réplicas
+
+```bash
+kubectl scale deployment catalogo-api --replicas=3 -n catalogo-app
+kubectl get pods -n catalogo-app -l app=catalogo-api
+kubectl get endpoints catalogo-api -n catalogo-app
+```
+
+Tras unos segundos deben verse **tres** Pods y **tres** direcciones `:8000` en
+ENDPOINTS de `catalogo-api`.
+
+### Producto con imagen y respuesta desde cualquier réplica
+
+En `http://172.16.20.15:30302` se carga o edita un producto con imagen (misma
+prueba que el ejercicio 4). El frontend habla con el ClusterIP `catalogo-api`;
+cada petición puede caer en una réplica distinta.
+
+Comprobación directa contra el NodePort de depuración (balanceo explícito):
+
+```bash
+for i in $(seq 1 10); do
+  curl -s -o /dev/null -w "%{http_code} " http://172.16.20.15:30502/productos
+done
+echo
+```
+
+Resultado esperado: diez códigos **200** (lista JSON de productos), aunque
+cada `curl` haya ido a un Pod distinto. Opcional:
+
+```bash
+curl -s http://172.16.20.15:30502/productos | head -c 200
+```
+
+Para ver qué réplicas atienden el Service:
+
+```bash
+kubectl get endpoints catalogo-api -n catalogo-app -o yaml | grep -E 'addresses:|ip:'
+```
+
+El manifiesto `deploy-catalogo-api.yaml` sigue declarando `replicas: 2`; el
+`scale` solo altera el **estado en vivo** del Deployment. Un
+`kubectl apply -f k8s/deploy-catalogo-api.yaml` volvería a fijar dos réplicas
+salvo que se actualice el YAML.
+
+### Disco del contenedor vs otra réplica (demostración)
+
+Si la API guardara fotos en el filesystem del Pod (`/tmp`, `/var/...`), cada
+réplica tendría su propio disco efímero: lo escrito en un contenedor no lo vería
+otro.
+
+```bash
+# Elige dos nombres distintos de la salida de get pods
+POD_A=$(kubectl get pod -n catalogo-app -l app=catalogo-api -o jsonpath='{.items[0].metadata.name}')
+POD_B=$(kubectl get pod -n catalogo-app -l app=catalogo-api -o jsonpath='{.items[1].metadata.name}')
+
+kubectl exec "$POD_A" -n catalogo-app -- \
+  sh -c 'echo prueba > /tmp/foto.bin; ls -l /tmp/foto.bin'
+
+kubectl exec "$POD_B" -n catalogo-app -- ls -l /tmp/foto.bin
+```
+
+En **POD_A** aparece `/tmp/foto.bin`. En **POD_B** el segundo `ls` falla con
+*No such file or directory*: el archivo no existe fuera de ese contenedor. Si se
+borra o recrea el Pod (`delete pod`, rollout, crash), el contenido de
+`/tmp/foto.bin` **desaparece** con el contenedor.
+
+`kubectl exec deploy/catalogo-api` ejecuta el comando en **una** réplica
+elegida al azar; para comparar entre Pods hace falta el nombre concreto de cada
+Pod, como arriba.
+
+### Respuesta por escrito (enunciado)
+
+Un archivo escrito en el disco de un Pod **no lo ve ninguna otra réplica**, y
+**desaparece** cuando el Pod se recrea. Por esa razón esta variante guarda los
+bytes de la imagen en **MongoDB** (`imagen_datos`, `imagen_tipo`, `imagen_hash`
+en `backend/main.py`), no en rutas compartidas entre contenedores: todas las
+réplicas leen y escriben el mismo catálogo vía Service `catalogo-db`. La
+carpeta `imagenes/` del repositorio solo alimenta el **seed** de demo al arrancar
+(`SEED_DEMO=true`); en runtime las fotos del catálogo viven en la base.
+
+Consecuencia para el diseño: la API puede escalar horizontalmente (stateless
+respecto del filesystem) siempre que el estado compartido (datos e imágenes)
+resida en un servicio centralizado — aquí MongoDB — y no en el disco local del
+Pod.
