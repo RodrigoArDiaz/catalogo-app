@@ -1181,3 +1181,97 @@ no fue necesario volver a aplicar manifiestos.
 En la semana 5 un Pod suelto era **mortal**. En la semana 6 el clúster
 **sostiene** el número de réplicas: borrar un Pod es un incidente que el
 controlador corrige, no un estado final.
+
+## Rolling update y rollback de la API (Trabajo Práctico Nº 6 - Ejercicio 7)
+
+El frontend muestra la versión en un badge (`VersionBadge.jsx`): lee
+`/api/health` y muestra `API v1`, `API v2`, etc. según el campo `version`
+que devuelve la API (variable `APP_VERSION` en el contenedor).
+
+Durante un rollout con **dos réplicas**, el Service reparte peticiones entre
+Pods viejos y nuevos: el badge puede **oscilar** entre v1 y v2 hasta que
+termina la actualización; luego queda estable en v2. Tras `rollout undo`,
+vuelve a v1.
+
+### Inconveniente: `APP_VERSION` fijo en el Deployment
+
+En el Pod de la semana 5 (`k8s/pod-catalogo-api.yaml`) conviene declarar
+`APP_VERSION=v1` en `env` para documentar la variable. Si se copia ese bloque
+tal cual al **Deployment** (`k8s/deploy-catalogo-api.yaml`), ocurre lo
+siguiente:
+
+1. La API lee la versión con `os.environ.get("APP_VERSION", "v1")` en
+   `backend/main.py`.
+2. Las variables del manifiesto Kubernetes **tienen prioridad** sobre el
+   `ENV APP_VERSION` que trae la imagen (build con `ARG APP_VERSION` en el
+   `Dockerfile`).
+3. Tras `kubectl set image ... catalogo-api:v2`, los Pods nuevos **sí** usan la
+   imagen v2, pero `/health` y el badge siguen en **v1** porque el Deployment
+   inyecta `APP_VERSION=v1` en todos los contenedores.
+
+Síntoma confuso: `kubectl get pods` muestra imagen `:v2`, `curl` a `:30502/health`
+sigue devolviendo `"version":"v1"`, y el rolling update parece “no hacer nada”
+en la UI.
+
+**Solución aplicada:** quitar `APP_VERSION` del bloque `env` en
+`deploy-catalogo-api.yaml` y dejar que la versión la defina **solo la imagen**
+(`docker build --build-arg APP_VERSION=v2 ...`). Volver a aplicar el
+Deployment (`kubectl apply -f k8s/deploy-catalogo-api.yaml`) y repetir el
+rollout con `set image` / `rollout undo`. Para volver a v1 por manifiesto, el
+YAML puede fijar `image: ...:v1` sin necesidad de `APP_VERSION` en `env`.
+
+### Publicar imagen v2
+
+El clúster solo descarga imágenes del registry; el tag debe incluir el usuario.
+
+```bash
+docker build --build-arg APP_VERSION=v2 -t diazrodrigoar/catalogo-api:v2 ./backend
+docker push diazrodrigoar/catalogo-api:v2
+```
+
+El `Dockerfile` de la API define `ARG APP_VERSION` y `ENV APP_VERSION` (semana
+2). Sin ese par, la imagen v2 seguiría reportando v1 en `/health` y el badge
+no cambiaría.
+
+### Actualización progresiva
+
+```bash
+kubectl set image deployment/catalogo-api \
+  catalogo-api=diazrodrigoar/catalogo-api:v2 -n catalogo-app
+kubectl rollout status deployment/catalogo-api -n catalogo-app
+kubectl rollout history deployment/catalogo-api -n catalogo-app
+```
+
+Con la app abierta en `http://172.16.20.15:30302`, observar el badge:
+**v1 → (posible mezcla v1/v2) → v2**.
+
+Verificación por NodePort de depuración:
+
+```bash
+curl -s http://172.16.20.15:30502/health
+```
+
+Respuesta esperada tras el rollout: `"version":"v2"`.
+
+### Rollback
+
+```bash
+kubectl rollout undo deployment/catalogo-api -n catalogo-app
+kubectl rollout status deployment/catalogo-api -n catalogo-app
+```
+
+El badge debe volver a **API v1**. La columna `CHANGE-CAUSE` de
+`kubectl rollout history` puede mostrar `<none>`; las revisiones se registran
+igual (comportamiento esperado del enunciado).
+
+### Errores frecuentes
+
+| Síntoma | Causa |
+| --- | --- |
+| Badge no pasa a v2 (imagen ya es `:v2`) | `APP_VERSION=v1` (u otro valor) en `env` del Deployment pisa el `ENV` de la imagen; quitar esa variable del manifiesto |
+| Badge no pasa a v2 (imagen correcta, sin `env` extra) | Falta `ARG`/`ENV APP_VERSION` en el build, o no se usó `--build-arg APP_VERSION=v2` |
+| `ImagePullBackOff` en Pods nuevos | Imagen `diazrodrigoar/catalogo-api:v2` no publicada o nombre sin usuario del registry |
+| Rollout detenido | Revisar `kubectl describe pod` / Events; la réplica anterior sigue atendiendo hasta corregir |
+
+Si la actualización falla por imagen, las réplicas en v1 siguen sirviendo;
+`kubectl rollout undo` revierte al ReplicaSet anterior.
