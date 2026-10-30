@@ -1367,3 +1367,88 @@ Consecuencia para el diseño: la API puede escalar horizontalmente (stateless
 respecto del filesystem) siempre que el estado compartido (datos e imágenes)
 resida en un servicio centralizado — aquí MongoDB — y no en el disco local del
 Pod.
+
+## MongoDB efímero y pérdida de datos (Trabajo Práctico Nº 6 - Ejercicio 9)
+
+### Limitación conocida (declarada)
+
+`catalogo-db` es un **Deployment** con imagen `mongo:7` y **sin** volumen
+persistente en `k8s/deploy-catalogo-db.yaml`: los datos viven en el filesystem
+**efímero** del contenedor. El Service `catalogo-db` sigue resolviendo tras un
+reinicio, pero la **base nueva está vacía** — no hay `PersistentVolumeClaim` ni
+montaje en `/data/db` como en Compose (`catalogo-db-data`).
+
+| Qué se pierde al recrear el Pod de MongoDB | Qué no se pierde |
+| --- | --- |
+| Productos creados o editados a mano en la UI | El manifiesto del Deployment y el Service |
+| Imágenes subidas por usuarios (están en la BD) | Las réplicas de la API (siguen corriendo) |
+| Todo el contenido de `catalogodb` | La definición del catálogo de demo en código (`catalogo_demo.py`) |
+
+**Resolución prevista:** semana **7**, con **PersistentVolume** + claim (y
+Secret/ConfigMap según el enunciado de esa entrega), de modo que `/data/db`
+sobreviva al delete del Pod.
+
+### Procedimiento observado
+
+Antes conviene tener en la UI al menos un producto **propio** (no solo el demo)
+para notar la diferencia tras el incidente.
+
+1. **Borrar el Pod de MongoDB** (el Deployment lo recrea):
+
+```bash
+kubectl delete pod -l app=catalogo-db -n catalogo-app
+kubectl get pods -n catalogo-app -l app=catalogo-db -w
+```
+
+Cuando el reemplazo esté `Running` / `1/1`, listar productos:
+
+```bash
+curl -s http://172.16.20.15:30502/productos
+# o en el navegador: http://172.16.20.15:30302
+```
+
+**Resultado:** catálogo **vacío** (`[]` o lista sin ítems). La API responde, pero
+MongoDB arrancó con datos nuevos.
+
+2. **Reiniciar la API** para que vuelva a ejecutar la siembra al arrancar
+   (`SEED_DEMO=true` en `deploy-catalogo-api.yaml`; ver `lifespan` en
+   `backend/main.py`):
+
+```bash
+kubectl rollout restart deployment/catalogo-api -n catalogo-app
+kubectl rollout status deployment/catalogo-api -n catalogo-app
+curl -s http://172.16.20.15:30502/productos | head -c 400
+```
+
+**Resultado:** reaparece el **catálogo de demostración** (SKUs fijos de
+`CATALOGO_DEMO`, upsert por `sku` en `sembrar_catalogo()`). Los productos
+cargados **a mano** antes del delete de MongoDB **no** vuelven: la siembra no
+restaura documentos que no están en el demo.
+
+### Por qué pasa (cadena causa → efecto)
+
+```text
+delete pod MongoDB
+  → Deployment crea Pod nuevo con disco vacío
+  → MongoDB sin colecciones / sin datos previos
+  → GET /productos devuelve []
+
+rollout restart API
+  → cada réplica nueva ejecuta esperar_mongo() + sembrar_catalogo()
+  → solo se upsertean los productos del demo
+  → el catálogo manual sigue ausente
+```
+
+Esto es distinto del ejercicio 6 (borrar un Pod de la **API**): ahí el
+Deployment recrea la réplica y **MongoDB intacto** conserva todo. Aquí el
+cuello de botella es la **persistencia de la base**, no el número de réplicas de
+la API.
+
+### Nota operativa
+
+Tras el ejercicio 8, la API puede seguir en **3** réplicas por el `scale`; el
+`rollout restart` las reinicia todas. Para volver al manifiesto:
+
+```bash
+kubectl scale deployment catalogo-api --replicas=2 -n catalogo-app
+```
