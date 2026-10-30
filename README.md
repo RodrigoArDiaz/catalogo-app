@@ -1066,3 +1066,46 @@ YAML, registry remoto y `kubectl`. Lo que **todavía falta** — Services,
 Deployments, almacenamiento, Secrets e Ingress — es exactamente lo que explica
 por qué esta entrega falla en DNS, IPs efímeras y Pods que nadie recrea, y lo
 que la semana 6 en adelante va a agregar.
+
+## Selectors y Endpoints (Trabajo Práctico Nº 6 - Ejercicio 3)
+
+Cada Service en `k8s/svc-*.yaml` declara un selector `app: catalogo-*`. Los
+Deployments en `k8s/deploy-*.yaml` etiquetan sus Pods con la misma label en
+`spec.template.metadata.labels`. Kubernetes copia las IP:puerto de esos Pods
+listos a la columna **ENDPOINTS** del Service.
+
+Verificación:
+
+```bash
+kubectl get endpoints -n catalogo-app
+```
+
+Salida:
+
+```
+Warning: v1 Endpoints is deprecated in v1.33+; use discovery.k8s.io/v1 EndpointSlice
+NAME                ENDPOINTS                           AGE
+catalogo-api        10.244.0.20:8000,10.244.0.22:8000   4m13s
+catalogo-db         10.244.0.21:27017                   55m
+catalogo-frontend   10.244.0.27:8080,10.244.0.28:8080   54m
+```
+
+| Service | ENDPOINTS | Réplicas esperadas |
+| --- | --- | --- |
+| `catalogo-db` | 1 dirección `:27017` | 1 |
+| `catalogo-api` | 2 direcciones `:8000` | 2 |
+| `catalogo-frontend` | 2 direcciones `:8080` | 2 |
+
+Los tres Services están vinculados a sus Pods: el selector coincide con las
+labels del template de cada Deployment.
+
+Si el selector no coincidiera con ninguna label —por ejemplo
+`app: catalogo-api-typo`— el Service se crearía sin error, pero **ENDPOINTS**
+quedaría en `<none>` y el tráfico no llegaría a ningún Pod. Eso es distinto de
+un Service recién creado mientras los Pods aún no están **Ready**: en ese caso
+ENDPOINTS también puede mostrar `<none>` unos instantes hasta que las réplicas
+estabilizan.
+
+En clústeres 1.33+ conviene corroborar con
+`kubectl get endpointslices -n catalogo-app` si aparece el warning de
+deprecación; las direcciones deben coincidir con las de `get endpoints`.
