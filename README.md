@@ -43,6 +43,39 @@ mongodb://catalogo_user:catalogo_pass@catalogo-db:27017/catalogo?authSource=admi
 Sin `authSource=admin`, MongoDB intenta autenticar al usuario contra la base
 `catalogo` y la autenticación falla.
 
+## ConfigMap y Secret del TP Nº 7 (Ejercicios 1 a 3)
+
+Se agregaron manifiestos solo para los objetos de configuración; el cableado en
+los Deployments corresponde al ejercicio 4.
+
+| Objeto | Archivo |
+| --- | --- |
+| `catalogo-api-config` (ConfigMap) | `k8s/configmap-catalogo-api.yaml` |
+| `catalogo-frontend-config` (ConfigMap) | `k8s/configmap-catalogo-frontend.yaml` |
+| `catalogo-db-secret` (Secret) | `k8s/secret-catalogo-db.yaml` |
+
+Aplicar en el namespace `catalogo-app`:
+
+```bash
+kubectl apply -f k8s/configmap-catalogo-api.yaml
+kubectl apply -f k8s/configmap-catalogo-frontend.yaml
+kubectl apply -f k8s/secret-catalogo-db.yaml
+```
+
+### Ejercicio 3: un Secret no está cifrado
+
+`kubectl get secret` muestra la clave en **base64**, que sirve para transporte
+en YAML, no para ocultar la contraseña. Cualquiera con acceso de lectura al
+objeto puede decodificarla:
+
+```bash
+kubectl get secret catalogo-db-secret -n catalogo-app \
+  -o jsonpath='{.data.MONGO_INITDB_ROOT_PASSWORD}' | base64 -d; echo
+```
+
+Para que el dato esté **realmente** protegido hace falta **cifrado en reposo en
+etcd** (p. ej. `EncryptionConfiguration` en el apiserver) o un **gestor de
+secretos externo** (HashiCorp Vault, cloud KMS, etc.) integrado al clúster.
 
 
 ## Comparación de imágenes (Trabajo Practico Nº 2 - Ejercicio 8)
@@ -1193,12 +1226,11 @@ Pods viejos y nuevos: el badge puede **oscilar** entre v1 y v2 hasta que
 termina la actualización; luego queda estable en v2. Tras `rollout undo`,
 vuelve a v1.
 
-### Inconveniente: `APP_VERSION` fijo en el Deployment
+### Inconveniente: `APP_VERSION` fijo en el manifiesto
 
-En el Pod de la semana 5 (`k8s/pod-catalogo-api.yaml`) conviene declarar
-`APP_VERSION=v1` en `env` para documentar la variable. Si se copia ese bloque
-tal cual al **Deployment** (`k8s/deploy-catalogo-api.yaml`), ocurre lo
-siguiente:
+Si se declara `APP_VERSION` en `env` del Pod o del Deployment (o en un
+ConfigMap montado como variables de entorno) y se copia el mismo patrón a
+ambos, ocurre lo siguiente:
 
 1. La API lee la versión con `os.environ.get("APP_VERSION", "v1")` en
    `backend/main.py`.
@@ -1213,12 +1245,15 @@ Síntoma confuso: `kubectl get pods` muestra imagen `:v2`, `curl` a `:30502/heal
 sigue devolviendo `"version":"v1"`, y el rolling update parece “no hacer nada”
 en la UI.
 
-**Solución aplicada:** quitar `APP_VERSION` del bloque `env` en
-`deploy-catalogo-api.yaml` y dejar que la versión la defina **solo la imagen**
-(`docker build --build-arg APP_VERSION=v2 ...`). Volver a aplicar el
-Deployment (`kubectl apply -f k8s/deploy-catalogo-api.yaml`) y repetir el
-rollout con `set image` / `rollout undo`. Para volver a v1 por manifiesto, el
-YAML puede fijar `image: ...:v1` sin necesidad de `APP_VERSION` en `env`.
+**Solución aplicada:** no incluir `APP_VERSION` en el ConfigMap
+`catalogo-api-config` ni en `env`; la versión la define **solo la imagen**
+(`docker build --build-arg APP_VERSION=v2 ...`). Los valores no sensibles
+(`DB_HOST`, `DB_PORT`, `DB_NAME`, `ROOT_PATH`, `SEED_DEMO`) viven en
+`k8s/configmap-catalogo-api.yaml`. Aplicar primero el ConfigMap y luego el
+Deployment o el Pod. Volver a aplicar el Deployment
+(`kubectl apply -f k8s/deploy-catalogo-api.yaml`) y repetir el rollout con
+`set image` / `rollout undo`. Para volver a v1 por manifiesto, el YAML puede
+fijar `image: ...:v1` sin `APP_VERSION` en el entorno.
 
 ### Publicar imagen v2
 
