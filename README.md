@@ -45,8 +45,7 @@ Sin `authSource=admin`, MongoDB intenta autenticar al usuario contra la base
 
 ## ConfigMap y Secret del TP Nº 7 (Ejercicios 1 a 3)
 
-Se agregaron manifiestos solo para los objetos de configuración; el cableado en
-los Deployments corresponde al ejercicio 4.
+Objetos de configuración (sin cablear Deployments hasta el ejercicio 4):
 
 | Objeto | Archivo |
 | --- | --- |
@@ -54,15 +53,13 @@ los Deployments corresponde al ejercicio 4.
 | `catalogo-frontend-config` (ConfigMap) | `k8s/configmap-catalogo-frontend.yaml` |
 | `catalogo-db-secret` (Secret) | `k8s/secret-catalogo-db.yaml` |
 
-Aplicar en el namespace `catalogo-app`:
-
 ```bash
 kubectl apply -f k8s/configmap-catalogo-api.yaml
 kubectl apply -f k8s/configmap-catalogo-frontend.yaml
 kubectl apply -f k8s/secret-catalogo-db.yaml
 ```
 
-### Ejercicio 3: un Secret no está cifrado
+## TP Nº 7 — Ejercicio 3 (Secret y base64)
 
 `kubectl get secret` muestra la clave en **base64**, que sirve para transporte
 en YAML, no para ocultar la contraseña. Cualquiera con acceso de lectura al
@@ -76,6 +73,27 @@ kubectl get secret catalogo-db-secret -n catalogo-app \
 Para que el dato esté **realmente** protegido hace falta **cifrado en reposo en
 etcd** (p. ej. `EncryptionConfiguration` en el apiserver) o un **gestor de
 secretos externo** (HashiCorp Vault, cloud KMS, etc.) integrado al clúster.
+
+## TP Nº 7 — Ejercicio 4 (Deployments)
+
+Los tres Deployments (`deploy-catalogo-*.yaml`) referencian esos objetos: `envFrom`
+con `configMapRef`, credenciales con `valueFrom.secretKeyRef` (la API expone
+`DB_USER` / `DB_PASSWORD` mapeadas a las claves `MONGO_INITDB_*` del mismo Secret
+que usa MongoDB). No quedan literales de configuración en `env`, salvo `image:`.
+
+```bash
+kubectl apply -f k8s/deploy-catalogo-db.yaml
+kubectl apply -f k8s/deploy-catalogo-api.yaml
+kubectl apply -f k8s/deploy-catalogo-frontend.yaml
+```
+
+Verificación:
+
+```bash
+kubectl exec deploy/catalogo-api -n catalogo-app -- env \
+  | grep -E '^(DB_(HOST|PORT|NAME|USER)|ROOT_PATH)='
+kubectl exec deploy/catalogo-frontend -n catalogo-app -- env | grep API_
+```
 
 
 ## Comparación de imágenes (Trabajo Practico Nº 2 - Ejercicio 8)
