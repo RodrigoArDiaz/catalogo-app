@@ -229,6 +229,57 @@ es **no perder** el creado a mano.
 **No usar como única prueba:** un catálogo “lleno” solo con SKUs del demo tras
 reinicios — eso también ocurriría con un volumen vacío + siembra de la API.
 
+## TP Nº 7 — Ejercicio 8 (`catalogo-app-ingress`)
+
+| Recurso | Archivo |
+| --- | --- |
+| Ingress `catalogo-app-ingress` | `k8s/ingress-catalogo-app.yaml` |
+
+Una sola regla: host **`catalogo.local`**, path **`/`** → Service
+`catalogo-frontend:8080`. **No** hay regla `/api`.
+
+### Por qué no enrutar `/api` en el Ingress
+
+En Compose y en este stack la **única** puerta de entrada al navegador es el
+frontend (nginx). El proxy hacia la API vive en la plantilla
+`frontend/nginx/templates/default.conf.template` (`location /api/` →
+`API_HOST:API_PORT`). Si el Ingress duplicara `/api` hacia `catalogo-api`,
+habría **dos** decisiones de enrutamiento (Ingress + nginx del contenedor),
+riesgo de URLs y prefijos distintos a `ROOT_PATH=/api`, y se rompe la paridad
+con Compose, donde **no** existe Ingress.
+
+### Falso positivo: `/productos` vs `/api/productos`
+
+El SPA usa `try_files` para servir `index.html` en rutas desconocidas. Por eso
+`http://catalogo.local/productos` puede devolver **200 + HTML** sin contactar la
+API. La comprobación válida es **`/api/productos`** (proxy nginx → FastAPI).
+
+### Comandos 
+
+```bash
+# IP del balanceador del Ingress Controller (puerto 80, sin :puerto en la URL)
+kubectl get svc -n nginx-ingress nginx-ingress-controller \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}'; echo
+
+# Resolver catalogo.local hacia esa IP (una sola vez por máquina)
+# echo "<EXTERNAL-IP> catalogo.local" | sudo tee -a /etc/hosts
+
+kubectl apply -f k8s/ingress-catalogo-app.yaml
+
+kubectl get ingress -n catalogo-app
+
+# Verificación válida (JSON de la API detrás del proxy del frontend)
+curl -s http://catalogo.local/api/productos | head -c 300
+
+# Falso positivo (HTML del SPA, no el catálogo)
+curl -s -o /dev/null -w "%{http_code}\n" http://catalogo.local/productos
+curl -s http://catalogo.local/productos | head -c 120
+```
+
+Esperar que la columna **ADDRESS** del Ingress muestre la IP del controller antes
+de probar con `curl`. El ejercicio **9** valida
+`http://catalogo.local/api/docs` (Swagger y `ROOT_PATH` desde el ConfigMap).
+
 
 ## Comparación de imágenes (Trabajo Practico Nº 2 - Ejercicio 8)
 
