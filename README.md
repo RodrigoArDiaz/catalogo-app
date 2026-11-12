@@ -281,6 +281,35 @@ de probar con `curl`. El ejercicio **9** valida
 `http://catalogo.local/api/docs` (Swagger y `ROOT_PATH` desde el ConfigMap).
 
 
+## TP Nº 7 — Ejercicio 10 (inventario de objetos)
+
+Tras esta entrega el stack en `catalogo-app` declara **once** recursos
+Kubernetes aplicables con `kubectl apply -f k8s/`. Los manifiestos `pod-*.yaml`
+(período sin controller) y `svc-catalogo-api-nodeport.yaml` (depuración) no
+forman parte del inventario. La entrega **8** añadirá el duodécimo objeto
+(previsto: **HorizontalPodAutoscaler** para la API).
+
+| # | Nombre | Tipo | Función (una línea) | Manifiesto |
+| --- | --- | --- | --- | --- |
+| 1 | `catalogo-api` | Deployment | Réplicas de la API FastAPI que consumen ConfigMap y Secret | `k8s/deploy-catalogo-api.yaml` |
+| 2 | `catalogo-frontend` | Deployment | Réplicas del frontend nginx + SPA que proxean `/api/` hacia la API | `k8s/deploy-catalogo-frontend.yaml` |
+| 3 | `catalogo-db` | Deployment | Réplica única de MongoDB 7 con datos en PVC en `/data/db` | `k8s/deploy-catalogo-db.yaml` |
+| 4 | `catalogo-api` | Service (ClusterIP) | DNS interno y endpoints HTTP (8000) hacia Pods de la API | `k8s/svc-catalogo-api.yaml` |
+| 5 | `catalogo-frontend` | Service (NodePort) | Publicación del frontend (8080; NodePort 30302 en este clúster) | `k8s/svc-catalogo-frontend.yaml` |
+| 6 | `catalogo-db` | Service (ClusterIP) | DNS interno hacia MongoDB (27017) para la API | `k8s/svc-catalogo-db.yaml` |
+| 7 | `catalogo-api-config` | ConfigMap | Variables no sensibles de la API (`DB_*` parcial, `ROOT_PATH`, `SEED_DEMO`) | `k8s/configmap-catalogo-api.yaml` |
+| 8 | `catalogo-frontend-config` | ConfigMap | `API_HOST` y `API_PORT` para el proxy nginx del contenedor frontend | `k8s/configmap-catalogo-frontend.yaml` |
+| 9 | `catalogo-db-secret` | Secret | `MONGO_INITDB_ROOT_*` compartido por MongoDB y API (vía renombrado) | `k8s/secret-catalogo-db.yaml` |
+| 10 | `catalogo-db-pvc` | PersistentVolumeClaim | 1Gi RWO: persistencia de `/data/db` al recrear el Pod de la base | `k8s/pvc-catalogo-db.yaml` |
+| 11 | `catalogo-app-ingress` | Ingress | Entrada HTTP `catalogo.local/` hacia el Service del frontend (sin regla `/api`) | `k8s/ingress-catalogo-app.yaml` |
+
+Consulta global:
+
+```bash
+kubectl get deploy,svc,cm,secret,pvc,ingress -n catalogo-app
+```
+
+
 ## Comparación de imágenes (Trabajo Practico Nº 2 - Ejercicio 8)
 
 Se utiliza la columna DISK USAGE de Docker, tomando 1.71 GB como 1710 MB.
