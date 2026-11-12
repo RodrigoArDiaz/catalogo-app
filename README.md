@@ -160,6 +160,24 @@ MONGO_URI = os.environ.get("MONGO_URI") or (
 )
 ```
 
+## TP Nº 7 — Ejercicio 6 (`catalogo-db-pvc`)
+
+| Recurso | Archivo |
+| --- | --- |
+| PersistentVolumeClaim `catalogo-db-pvc` | `k8s/pvc-catalogo-db.yaml` |
+| Montaje en `/data/db` | `k8s/deploy-catalogo-db.yaml` |
+
+El claim pide **1Gi**, modo **ReadWriteOnce** y **no** fija `storageClassName`
+(uso de la StorageClass por defecto del clúster). Se monta en `/data/db` del
+contenedor `mongo:7` (ruta oficial de datos).
+
+**MongoDB vs MySQL (subPath):** la imagen de MongoDB **no** exige que
+`/data/db` esté vacío al montar; puede usar el volumen directamente en
+`/data/db` sin `subPath`. En la variante B (MySQL) suele hacer falta `subPath`
+para evitar conflictos con archivos que deja el proveedor del volumen — aquí no.
+
+
+
 
 ## Comparación de imágenes (Trabajo Practico Nº 2 - Ejercicio 8)
 
@@ -1493,8 +1511,8 @@ Pod.
 `catalogo-db` es un **Deployment** con imagen `mongo:7` y **sin** volumen
 persistente en `k8s/deploy-catalogo-db.yaml`: los datos viven en el filesystem
 **efímero** del contenedor. El Service `catalogo-db` sigue resolviendo tras un
-reinicio, pero la **base nueva está vacía** — no hay `PersistentVolumeClaim` ni
-montaje en `/data/db` como en Compose (`catalogo-db-data`).
+reinicio, pero la **base nueva está vacía** — antes del ejercicio 6 del TP Nº 7
+no había `catalogo-db-pvc` ni montaje en `/data/db` (ver sección ejercicio 6).
 
 | Qué se pierde al recrear el Pod de MongoDB | Qué no se pierde |
 | --- | --- |

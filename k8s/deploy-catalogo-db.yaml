@@ -18,6 +18,9 @@ spec:
           image: mongo:7
           ports:
             - containerPort: 27017
+          volumeMounts:
+            - name: catalogo-db-data
+              mountPath: /data/db
           env:
             - name: MONGO_INITDB_ROOT_USERNAME
               valueFrom:
@@ -29,3 +32,7 @@ spec:
                 secretKeyRef:
                   name: catalogo-db-secret
                   key: MONGO_INITDB_ROOT_PASSWORD
+      volumes:
+        - name: catalogo-db-data
+          persistentVolumeClaim:
+            claimName: catalogo-db-pvc
