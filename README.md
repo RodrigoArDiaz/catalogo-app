@@ -95,6 +95,71 @@ kubectl exec deploy/catalogo-api -n catalogo-app -- env \
 kubectl exec deploy/catalogo-frontend -n catalogo-app -- env | grep API_
 ```
 
+## TP Nº 7 — Ejercicio 5 (cadena MongoDB: piezas vs `MONGO_URI`)
+
+### Decisión
+
+Se eligió **piezas por separado**: `DB_HOST`, `DB_PORT` y `DB_NAME` en el
+ConfigMap `catalogo-api-config`; `DB_USER` y `DB_PASSWORD` en el contenedor vía
+`secretKeyRef` (mapeadas desde `MONGO_INITDB_*` del Secret `catalogo-db-secret`).
+**No** se define `MONGO_URI` en ningún manifiesto.
+
+La API (`backend/main.py`) arma la URI solo si `MONGO_URI` no está definida y
+añade `?authSource=admin` en el código, porque el usuario creado con
+`MONGO_INITDB_ROOT_*` vive en la base `admin`.
+
+### Por qué no `MONGO_URI` en el Secret
+
+- **Un solo Secret para Mongo y API**: las claves oficiales de la imagen MongoDB
+  (`MONGO_INITDB_ROOT_*`) se reutilizan con `valueFrom` hacia `DB_USER` /
+  `DB_PASSWORD`; no hace falta duplicar la contraseña en otra clave con URI
+  completa.
+- **Paridad con Compose y con el ejercicio 4**: host, puerto y nombre de base
+  siguen en ConfigMap; lo sensible solo en Secret.
+- **`authSource=admin` en un solo lugar**: si la URI fuera manual en el Secret,
+  un olvido del query string reproduce el `Authentication failed` del enunciado;
+  con piezas, la aplicación lo agrega siempre al construir la cadena.
+
+La alternativa válida es poner `MONGO_URI` entera en el Secret (incluyendo
+`?authSource=admin` redactado por quien escribe el Secret); no se usa aquí.
+
+### Advertencia del enunciado (defaults en la imagen)
+
+Si **no** llegan `DB_USER` o `DB_PASSWORD` al contenedor, `main.py` usa por
+omisión `catalogo_user` y `catalogo_pass` (igual que `.env.example` / Compose).
+La app **puede** seguir respondiendo aunque el Deployment esté mal cableado; la
+verificación que importa es la salida de `env`, no solo que `/health` devuelva
+200.
+
+```bash
+# 1) Piezas presentes (ConfigMap + Secret)
+kubectl exec deploy/catalogo-api -n catalogo-app -- env \
+  | grep -E '^(DB_(HOST|PORT|NAME|USER)|ROOT_PATH)='
+
+# 2) No se inyecta MONGO_URI (decisión “piezas”)
+kubectl exec deploy/catalogo-api -n catalogo-app -- env | grep '^MONGO_URI=' \
+  || echo "OK: MONGO_URI no definida en el Pod"
+
+# 3) Comprobación funcional opcional 
+kubectl exec deploy/catalogo-api -n catalogo-app -- \
+  python -c "import os; print('DB_USER=', os.getenv('DB_USER')); print('DB_PASSWORD set=', bool(os.getenv('DB_PASSWORD')))"
+curl -s "http://172.16.20.15:30502/api/health"
+```
+
+Ajustar host/puerto del `curl` al NodePort del clúster si difiere.
+
+Referencia de ensamblado en código:
+
+```58:64:backend/main.py
+MONGO_URI = os.environ.get("MONGO_URI") or (
+    f"mongodb://{os.environ.get('DB_USER', 'catalogo_user')}"
+    f":{os.environ.get('DB_PASSWORD', 'catalogo_pass')}"
+    f"@{os.environ.get('DB_HOST', 'localhost')}"
+    f":{os.environ.get('DB_PORT', '27017')}"
+    f"/{DB_NAME}?authSource=admin"
+)
+```
+
 
 ## Comparación de imágenes (Trabajo Practico Nº 2 - Ejercicio 8)
 
