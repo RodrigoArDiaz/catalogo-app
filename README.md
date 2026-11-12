@@ -176,7 +176,58 @@ contenedor `mongo:7` (ruta oficial de datos).
 `/data/db` sin `subPath`. En la variante B (MySQL) suele hacer falta `subPath`
 para evitar conflictos con archivos que deja el proveedor del volumen — aquí no.
 
+```bash
+kubectl apply -f k8s/pvc-catalogo-db.yaml
+kubectl get pvc,pv -n catalogo-app
+kubectl apply -f k8s/deploy-catalogo-db.yaml
+kubectl get pvc,pv -n catalogo-app
+kubectl exec deploy/catalogo-db -n catalogo-app -- ls -ld /data/db
+```
 
+## TP Nº 7 — Ejercicio 7 (persistencia real)
+
+Cierra la limitación del [TP Nº 6 — MongoDB efímero](#mongodb-efímero-y-pérdida-de-datos-trabajo-práctico-nº-6---ejercicio-9):
+con `catalogo-db-pvc` montado en `/data/db`, al recrear el Pod de MongoDB los
+datos en el volumen **permanecen**.
+
+### Falso positivo (variante C)
+
+Tras borrar la base, el **catálogo de demostración** puede **volver a verse**
+porque `SEED_DEMO=true` (ConfigMap) hace que la API ejecute `sembrar_catalogo()`
+al arrancar (`backend/main.py`). Esa siembra es idempotente por `sku` y **no**
+prueba persistencia.
+
+La **prueba válida** es un producto **cargado a mano en el navegador**, con **su
+imagen** (bytes en MongoDB), con un SKU o nombre que **no** esté en
+`catalogo_demo.py`. Ese ítem debe seguir en la respuesta de la API después del
+`delete pod` de la base.
+
+### Procedimiento
+
+1. Abrir el frontend (NodePort o Ingress) y **crear un producto propio con foto**.
+2. Anotar el `sku` o `nombre` para buscarlo después.
+3. Eliminar el Pod de MongoDB y esperar el reemplazo:
+
+```bash
+kubectl delete pod -l app=catalogo-db -n catalogo-app
+kubectl get pods -n catalogo-app -w
+```
+
+4. Cuando `catalogo-db` esté `1/1 Running`, consultar productos **por el proxy**
+   del frontend (ruta con prefijo `/api`):
+
+```bash
+curl -s http://172.16.20.15:30302/api/productos | head -c 300
+```
+
+Ajustar `172.16.20.15` a la IP del nodo del clúster.
+
+**Resultado esperado:** el producto manual **sigue listado** (y la imagen sigue
+disponible vía la API). Los ítems del demo pueden aparecer además; lo importante
+es **no perder** el creado a mano.
+
+**No usar como única prueba:** un catálogo “lleno” solo con SKUs del demo tras
+reinicios — eso también ocurriría con un volumen vacío + siembra de la API.
 
 
 ## Comparación de imágenes (Trabajo Practico Nº 2 - Ejercicio 8)
@@ -1520,11 +1571,12 @@ no había `catalogo-db-pvc` ni montaje en `/data/db` (ver sección ejercicio 6).
 | Imágenes subidas por usuarios (están en la BD) | Las réplicas de la API (siguen corriendo) |
 | Todo el contenido de `catalogodb` | La definición del catálogo de demo en código (`catalogo_demo.py`) |
 
-**Resolución prevista:** semana **7**, con **PersistentVolume** + claim (y
-Secret/ConfigMap según el enunciado de esa entrega), de modo que `/data/db`
-sobreviva al delete del Pod.
+**Resolución:** TP Nº 7 — ejercicios **6** (`catalogo-db-pvc` + montaje
+`/data/db`) y **7** (prueba con producto manual). Ver secciones ejercicio 6 y 7
+de este README. El procedimiento de abajo describe el comportamiento **sin**
+PVC (entrega anterior).
 
-### Procedimiento observado
+### Procedimiento observado (sin volumen persistente)
 
 Antes conviene tener en la UI al menos un producto **propio** (no solo el demo)
 para notar la diferencia tras el incidente.
