@@ -18,6 +18,10 @@ spec:
           image: diazrodrigoar/catalogo-api:v1
           ports:
             - containerPort: 8000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
           envFrom:
             - configMapRef:
                 name: catalogo-api-config
