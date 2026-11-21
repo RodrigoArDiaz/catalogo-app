@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalogo-frontend-config
+  namespace: {{ include "catalogo-app.namespace" . }}
+data:
+  API_HOST: {{ .Values.config.frontend.apiHost | quote }}
+  API_PORT: {{ .Values.config.frontend.apiPort | quote }}

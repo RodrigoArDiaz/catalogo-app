@@ -1,0 +1,49 @@
+api:
+  image:
+    repository: diazrodrigoar/catalogo-api
+    tag: v1
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+frontend:
+  image:
+    repository: diazrodrigoar/catalogo-frontend
+    tag: v1
+  replicas: 2
+  service:
+    nodePort: 30302
+
+db:
+  image:
+    repository: mongo
+    tag: "7"
+  replicas: 1
+  pvc:
+    storage: 1Gi
+
+config:
+  api:
+    dbHost: catalogo-db
+    dbPort: "27017"
+    dbName: catalogodb
+    rootPath: /api
+    seedDemo: "true"
+  frontend:
+    apiHost: catalogo-api
+    apiPort: "8000"
+
+secret:
+  mongoRootUsername: catalogo_user
+  mongoRootPassword: catalogo_pass
+
+ingress:
+  host: catalogo.local
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  cpuTargetUtilization: 50

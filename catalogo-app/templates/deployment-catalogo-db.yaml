@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalogo-db
+  namespace: {{ include "catalogo-app.namespace" . }}
+spec:
+  replicas: {{ .Values.db.replicas }}
+  selector:
+    matchLabels:
+      app: catalogo-db
+  template:
+    metadata:
+      labels:
+        app: catalogo-db
+    spec:
+      containers:
+        - name: catalogo-db
+          image: {{ printf "%s:%s" .Values.db.image.repository .Values.db.image.tag }}
+          ports:
+            - containerPort: 27017
+          volumeMounts:
+            - name: catalogo-db-data
+              mountPath: /data/db
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: catalogo-db-secret
+                  key: MONGO_INITDB_ROOT_USERNAME
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: catalogo-db-secret
+                  key: MONGO_INITDB_ROOT_PASSWORD
+      volumes:
+        - name: catalogo-db-data
+          persistentVolumeClaim:
+            claimName: catalogo-db-pvc

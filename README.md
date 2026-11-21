@@ -43,272 +43,6 @@ mongodb://catalogo_user:catalogo_pass@catalogo-db:27017/catalogo?authSource=admi
 Sin `authSource=admin`, MongoDB intenta autenticar al usuario contra la base
 `catalogo` y la autenticación falla.
 
-## ConfigMap y Secret del TP Nº 7 (Ejercicios 1 a 3)
-
-Objetos de configuración (sin cablear Deployments hasta el ejercicio 4):
-
-| Objeto | Archivo |
-| --- | --- |
-| `catalogo-api-config` (ConfigMap) | `k8s/configmap-catalogo-api.yaml` |
-| `catalogo-frontend-config` (ConfigMap) | `k8s/configmap-catalogo-frontend.yaml` |
-| `catalogo-db-secret` (Secret) | `k8s/secret-catalogo-db.yaml` |
-
-```bash
-kubectl apply -f k8s/configmap-catalogo-api.yaml
-kubectl apply -f k8s/configmap-catalogo-frontend.yaml
-kubectl apply -f k8s/secret-catalogo-db.yaml
-```
-
-## TP Nº 7 — Ejercicio 3 (Secret y base64)
-
-`kubectl get secret` muestra la clave en **base64**, que sirve para transporte
-en YAML, no para ocultar la contraseña. Cualquiera con acceso de lectura al
-objeto puede decodificarla:
-
-```bash
-kubectl get secret catalogo-db-secret -n catalogo-app \
-  -o jsonpath='{.data.MONGO_INITDB_ROOT_PASSWORD}' | base64 -d; echo
-```
-
-Para que el dato esté **realmente** protegido hace falta **cifrado en reposo en
-etcd** (p. ej. `EncryptionConfiguration` en el apiserver) o un **gestor de
-secretos externo** (HashiCorp Vault, cloud KMS, etc.) integrado al clúster.
-
-## TP Nº 7 — Ejercicio 4 (Deployments)
-
-Los tres Deployments (`deploy-catalogo-*.yaml`) referencian esos objetos: `envFrom`
-con `configMapRef`, credenciales con `valueFrom.secretKeyRef` (la API expone
-`DB_USER` / `DB_PASSWORD` mapeadas a las claves `MONGO_INITDB_*` del mismo Secret
-que usa MongoDB). No quedan literales de configuración en `env`, salvo `image:`.
-
-```bash
-kubectl apply -f k8s/deploy-catalogo-db.yaml
-kubectl apply -f k8s/deploy-catalogo-api.yaml
-kubectl apply -f k8s/deploy-catalogo-frontend.yaml
-```
-
-Verificación:
-
-```bash
-kubectl exec deploy/catalogo-api -n catalogo-app -- env \
-  | grep -E '^(DB_(HOST|PORT|NAME|USER)|ROOT_PATH)='
-kubectl exec deploy/catalogo-frontend -n catalogo-app -- env | grep API_
-```
-
-## TP Nº 7 — Ejercicio 5 (cadena MongoDB: piezas vs `MONGO_URI`)
-
-### Decisión
-
-Se eligió **piezas por separado**: `DB_HOST`, `DB_PORT` y `DB_NAME` en el
-ConfigMap `catalogo-api-config`; `DB_USER` y `DB_PASSWORD` en el contenedor vía
-`secretKeyRef` (mapeadas desde `MONGO_INITDB_*` del Secret `catalogo-db-secret`).
-**No** se define `MONGO_URI` en ningún manifiesto.
-
-La API (`backend/main.py`) arma la URI solo si `MONGO_URI` no está definida y
-añade `?authSource=admin` en el código, porque el usuario creado con
-`MONGO_INITDB_ROOT_*` vive en la base `admin`.
-
-### Por qué no `MONGO_URI` en el Secret
-
-- **Un solo Secret para Mongo y API**: las claves oficiales de la imagen MongoDB
-  (`MONGO_INITDB_ROOT_*`) se reutilizan con `valueFrom` hacia `DB_USER` /
-  `DB_PASSWORD`; no hace falta duplicar la contraseña en otra clave con URI
-  completa.
-- **Paridad con Compose y con el ejercicio 4**: host, puerto y nombre de base
-  siguen en ConfigMap; lo sensible solo en Secret.
-- **`authSource=admin` en un solo lugar**: si la URI fuera manual en el Secret,
-  un olvido del query string reproduce el `Authentication failed` del enunciado;
-  con piezas, la aplicación lo agrega siempre al construir la cadena.
-
-La alternativa válida es poner `MONGO_URI` entera en el Secret (incluyendo
-`?authSource=admin` redactado por quien escribe el Secret); no se usa aquí.
-
-### Advertencia del enunciado (defaults en la imagen)
-
-Si **no** llegan `DB_USER` o `DB_PASSWORD` al contenedor, `main.py` usa por
-omisión `catalogo_user` y `catalogo_pass` (igual que `.env.example` / Compose).
-La app **puede** seguir respondiendo aunque el Deployment esté mal cableado; la
-verificación que importa es la salida de `env`, no solo que `/health` devuelva
-200.
-
-```bash
-# 1) Piezas presentes (ConfigMap + Secret)
-kubectl exec deploy/catalogo-api -n catalogo-app -- env \
-  | grep -E '^(DB_(HOST|PORT|NAME|USER)|ROOT_PATH)='
-
-# 2) No se inyecta MONGO_URI (decisión “piezas”)
-kubectl exec deploy/catalogo-api -n catalogo-app -- env | grep '^MONGO_URI=' \
-  || echo "OK: MONGO_URI no definida en el Pod"
-
-# 3) Comprobación funcional opcional 
-kubectl exec deploy/catalogo-api -n catalogo-app -- \
-  python -c "import os; print('DB_USER=', os.getenv('DB_USER')); print('DB_PASSWORD set=', bool(os.getenv('DB_PASSWORD')))"
-curl -s "http://172.16.20.15:30502/api/health"
-```
-
-Ajustar host/puerto del `curl` al NodePort del clúster si difiere.
-
-Referencia de ensamblado en código:
-
-```58:64:backend/main.py
-MONGO_URI = os.environ.get("MONGO_URI") or (
-    f"mongodb://{os.environ.get('DB_USER', 'catalogo_user')}"
-    f":{os.environ.get('DB_PASSWORD', 'catalogo_pass')}"
-    f"@{os.environ.get('DB_HOST', 'localhost')}"
-    f":{os.environ.get('DB_PORT', '27017')}"
-    f"/{DB_NAME}?authSource=admin"
-)
-```
-
-## TP Nº 7 — Ejercicio 6 (`catalogo-db-pvc`)
-
-| Recurso | Archivo |
-| --- | --- |
-| PersistentVolumeClaim `catalogo-db-pvc` | `k8s/pvc-catalogo-db.yaml` |
-| Montaje en `/data/db` | `k8s/deploy-catalogo-db.yaml` |
-
-El claim pide **1Gi**, modo **ReadWriteOnce** y **no** fija `storageClassName`
-(uso de la StorageClass por defecto del clúster). Se monta en `/data/db` del
-contenedor `mongo:7` (ruta oficial de datos).
-
-**MongoDB vs MySQL (subPath):** la imagen de MongoDB **no** exige que
-`/data/db` esté vacío al montar; puede usar el volumen directamente en
-`/data/db` sin `subPath`. En la variante B (MySQL) suele hacer falta `subPath`
-para evitar conflictos con archivos que deja el proveedor del volumen — aquí no.
-
-```bash
-kubectl apply -f k8s/pvc-catalogo-db.yaml
-kubectl get pvc,pv -n catalogo-app
-kubectl apply -f k8s/deploy-catalogo-db.yaml
-kubectl get pvc,pv -n catalogo-app
-kubectl exec deploy/catalogo-db -n catalogo-app -- ls -ld /data/db
-```
-
-## TP Nº 7 — Ejercicio 7 (persistencia real)
-
-Cierra la limitación del [TP Nº 6 — MongoDB efímero](#mongodb-efímero-y-pérdida-de-datos-trabajo-práctico-nº-6---ejercicio-9):
-con `catalogo-db-pvc` montado en `/data/db`, al recrear el Pod de MongoDB los
-datos en el volumen **permanecen**.
-
-### Falso positivo (variante C)
-
-Tras borrar la base, el **catálogo de demostración** puede **volver a verse**
-porque `SEED_DEMO=true` (ConfigMap) hace que la API ejecute `sembrar_catalogo()`
-al arrancar (`backend/main.py`). Esa siembra es idempotente por `sku` y **no**
-prueba persistencia.
-
-La **prueba válida** es un producto **cargado a mano en el navegador**, con **su
-imagen** (bytes en MongoDB), con un SKU o nombre que **no** esté en
-`catalogo_demo.py`. Ese ítem debe seguir en la respuesta de la API después del
-`delete pod` de la base.
-
-### Procedimiento
-
-1. Abrir el frontend (NodePort o Ingress) y **crear un producto propio con foto**.
-2. Anotar el `sku` o `nombre` para buscarlo después.
-3. Eliminar el Pod de MongoDB y esperar el reemplazo:
-
-```bash
-kubectl delete pod -l app=catalogo-db -n catalogo-app
-kubectl get pods -n catalogo-app -w
-```
-
-4. Cuando `catalogo-db` esté `1/1 Running`, consultar productos **por el proxy**
-   del frontend (ruta con prefijo `/api`):
-
-```bash
-curl -s http://172.16.20.15:30302/api/productos | head -c 300
-```
-
-Ajustar `172.16.20.15` a la IP del nodo del clúster.
-
-**Resultado esperado:** el producto manual **sigue listado** (y la imagen sigue
-disponible vía la API). Los ítems del demo pueden aparecer además; lo importante
-es **no perder** el creado a mano.
-
-**No usar como única prueba:** un catálogo “lleno” solo con SKUs del demo tras
-reinicios — eso también ocurriría con un volumen vacío + siembra de la API.
-
-## TP Nº 7 — Ejercicio 8 (`catalogo-app-ingress`)
-
-| Recurso | Archivo |
-| --- | --- |
-| Ingress `catalogo-app-ingress` | `k8s/ingress-catalogo-app.yaml` |
-
-Una sola regla: host **`catalogo.local`**, path **`/`** → Service
-`catalogo-frontend:8080`. **No** hay regla `/api`.
-
-### Por qué no enrutar `/api` en el Ingress
-
-En Compose y en este stack la **única** puerta de entrada al navegador es el
-frontend (nginx). El proxy hacia la API vive en la plantilla
-`frontend/nginx/templates/default.conf.template` (`location /api/` →
-`API_HOST:API_PORT`). Si el Ingress duplicara `/api` hacia `catalogo-api`,
-habría **dos** decisiones de enrutamiento (Ingress + nginx del contenedor),
-riesgo de URLs y prefijos distintos a `ROOT_PATH=/api`, y se rompe la paridad
-con Compose, donde **no** existe Ingress.
-
-### Falso positivo: `/productos` vs `/api/productos`
-
-El SPA usa `try_files` para servir `index.html` en rutas desconocidas. Por eso
-`http://catalogo.local/productos` puede devolver **200 + HTML** sin contactar la
-API. La comprobación válida es **`/api/productos`** (proxy nginx → FastAPI).
-
-### Comandos 
-
-```bash
-# IP del balanceador del Ingress Controller (puerto 80, sin :puerto en la URL)
-kubectl get svc -n nginx-ingress nginx-ingress-controller \
-  -o jsonpath='{.status.loadBalancer.ingress[0].ip}'; echo
-
-# Resolver catalogo.local hacia esa IP (una sola vez por máquina)
-# echo "<EXTERNAL-IP> catalogo.local" | sudo tee -a /etc/hosts
-
-kubectl apply -f k8s/ingress-catalogo-app.yaml
-
-kubectl get ingress -n catalogo-app
-
-# Verificación válida (JSON de la API detrás del proxy del frontend)
-curl -s http://catalogo.local/api/productos | head -c 300
-
-# Falso positivo (HTML del SPA, no el catálogo)
-curl -s -o /dev/null -w "%{http_code}\n" http://catalogo.local/productos
-curl -s http://catalogo.local/productos | head -c 120
-```
-
-Esperar que la columna **ADDRESS** del Ingress muestre la IP del controller antes
-de probar con `curl`. El ejercicio **9** valida
-`http://catalogo.local/api/docs` (Swagger y `ROOT_PATH` desde el ConfigMap).
-
-
-## TP Nº 7 — Ejercicio 10 (inventario de objetos)
-
-Tras esta entrega el stack en `catalogo-app` declara **once** recursos
-Kubernetes aplicables con `kubectl apply -f k8s/`. Los manifiestos `pod-*.yaml`
-(período sin controller) y `svc-catalogo-api-nodeport.yaml` (depuración) no
-forman parte del inventario. La entrega **8** añadirá el duodécimo objeto
-(previsto: **HorizontalPodAutoscaler** para la API).
-
-| # | Nombre | Tipo | Función (una línea) | Manifiesto |
-| --- | --- | --- | --- | --- |
-| 1 | `catalogo-api` | Deployment | Réplicas de la API FastAPI que consumen ConfigMap y Secret | `k8s/deploy-catalogo-api.yaml` |
-| 2 | `catalogo-frontend` | Deployment | Réplicas del frontend nginx + SPA que proxean `/api/` hacia la API | `k8s/deploy-catalogo-frontend.yaml` |
-| 3 | `catalogo-db` | Deployment | Réplica única de MongoDB 7 con datos en PVC en `/data/db` | `k8s/deploy-catalogo-db.yaml` |
-| 4 | `catalogo-api` | Service (ClusterIP) | DNS interno y endpoints HTTP (8000) hacia Pods de la API | `k8s/svc-catalogo-api.yaml` |
-| 5 | `catalogo-frontend` | Service (NodePort) | Publicación del frontend (8080; NodePort 30302 en este clúster) | `k8s/svc-catalogo-frontend.yaml` |
-| 6 | `catalogo-db` | Service (ClusterIP) | DNS interno hacia MongoDB (27017) para la API | `k8s/svc-catalogo-db.yaml` |
-| 7 | `catalogo-api-config` | ConfigMap | Variables no sensibles de la API (`DB_*` parcial, `ROOT_PATH`, `SEED_DEMO`) | `k8s/configmap-catalogo-api.yaml` |
-| 8 | `catalogo-frontend-config` | ConfigMap | `API_HOST` y `API_PORT` para el proxy nginx del contenedor frontend | `k8s/configmap-catalogo-frontend.yaml` |
-| 9 | `catalogo-db-secret` | Secret | `MONGO_INITDB_ROOT_*` compartido por MongoDB y API (vía renombrado) | `k8s/secret-catalogo-db.yaml` |
-| 10 | `catalogo-db-pvc` | PersistentVolumeClaim | 1Gi RWO: persistencia de `/data/db` al recrear el Pod de la base | `k8s/pvc-catalogo-db.yaml` |
-| 11 | `catalogo-app-ingress` | Ingress | Entrada HTTP `catalogo.local/` hacia el Service del frontend (sin regla `/api`) | `k8s/ingress-catalogo-app.yaml` |
-
-Consulta global:
-
-```bash
-kubectl get deploy,svc,cm,secret,pvc,ingress -n catalogo-app
-```
-
 
 ## Comparación de imágenes (Trabajo Practico Nº 2 - Ejercicio 8)
 
@@ -1720,3 +1454,324 @@ Tras el ejercicio 8, la API puede seguir en **3** réplicas por el `scale`; el
 ```bash
 kubectl scale deployment catalogo-api --replicas=2 -n catalogo-app
 ```
+
+## ConfigMap y Secret del TP Nº 7 (Ejercicios 1 a 3)
+
+Objetos de configuración (sin cablear Deployments hasta el ejercicio 4):
+
+| Objeto | Archivo |
+| --- | --- |
+| `catalogo-api-config` (ConfigMap) | `k8s/configmap-catalogo-api.yaml` |
+| `catalogo-frontend-config` (ConfigMap) | `k8s/configmap-catalogo-frontend.yaml` |
+| `catalogo-db-secret` (Secret) | `k8s/secret-catalogo-db.yaml` |
+
+```bash
+kubectl apply -f k8s/configmap-catalogo-api.yaml
+kubectl apply -f k8s/configmap-catalogo-frontend.yaml
+kubectl apply -f k8s/secret-catalogo-db.yaml
+```
+
+## TP Nº 7 — Ejercicio 3 (Secret y base64)
+
+`kubectl get secret` muestra la clave en **base64**, que sirve para transporte
+en YAML, no para ocultar la contraseña. Cualquiera con acceso de lectura al
+objeto puede decodificarla:
+
+```bash
+kubectl get secret catalogo-db-secret -n catalogo-app \
+  -o jsonpath='{.data.MONGO_INITDB_ROOT_PASSWORD}' | base64 -d; echo
+```
+
+Para que el dato esté **realmente** protegido hace falta **cifrado en reposo en
+etcd** (p. ej. `EncryptionConfiguration` en el apiserver) o un **gestor de
+secretos externo** (HashiCorp Vault, cloud KMS, etc.) integrado al clúster.
+
+## TP Nº 7 — Ejercicio 4 (Deployments)
+
+Los tres Deployments (`deploy-catalogo-*.yaml`) referencian esos objetos: `envFrom`
+con `configMapRef`, credenciales con `valueFrom.secretKeyRef` (la API expone
+`DB_USER` / `DB_PASSWORD` mapeadas a las claves `MONGO_INITDB_*` del mismo Secret
+que usa MongoDB). No quedan literales de configuración en `env`, salvo `image:`.
+
+```bash
+kubectl apply -f k8s/deploy-catalogo-db.yaml
+kubectl apply -f k8s/deploy-catalogo-api.yaml
+kubectl apply -f k8s/deploy-catalogo-frontend.yaml
+```
+
+Verificación:
+
+```bash
+kubectl exec deploy/catalogo-api -n catalogo-app -- env \
+  | grep -E '^(DB_(HOST|PORT|NAME|USER)|ROOT_PATH)='
+kubectl exec deploy/catalogo-frontend -n catalogo-app -- env | grep API_
+```
+
+## TP Nº 7 — Ejercicio 5 (cadena MongoDB: piezas vs `MONGO_URI`)
+
+### Decisión
+
+Se eligió **piezas por separado**: `DB_HOST`, `DB_PORT` y `DB_NAME` en el
+ConfigMap `catalogo-api-config`; `DB_USER` y `DB_PASSWORD` en el contenedor vía
+`secretKeyRef` (mapeadas desde `MONGO_INITDB_*` del Secret `catalogo-db-secret`).
+**No** se define `MONGO_URI` en ningún manifiesto.
+
+La API (`backend/main.py`) arma la URI solo si `MONGO_URI` no está definida y
+añade `?authSource=admin` en el código, porque el usuario creado con
+`MONGO_INITDB_ROOT_*` vive en la base `admin`.
+
+### Por qué no `MONGO_URI` en el Secret
+
+- **Un solo Secret para Mongo y API**: las claves oficiales de la imagen MongoDB
+  (`MONGO_INITDB_ROOT_*`) se reutilizan con `valueFrom` hacia `DB_USER` /
+  `DB_PASSWORD`; no hace falta duplicar la contraseña en otra clave con URI
+  completa.
+- **Paridad con Compose y con el ejercicio 4**: host, puerto y nombre de base
+  siguen en ConfigMap; lo sensible solo en Secret.
+- **`authSource=admin` en un solo lugar**: si la URI fuera manual en el Secret,
+  un olvido del query string reproduce el `Authentication failed` del enunciado;
+  con piezas, la aplicación lo agrega siempre al construir la cadena.
+
+La alternativa válida es poner `MONGO_URI` entera en el Secret (incluyendo
+`?authSource=admin` redactado por quien escribe el Secret); no se usa aquí.
+
+### Advertencia del enunciado (defaults en la imagen)
+
+Si **no** llegan `DB_USER` o `DB_PASSWORD` al contenedor, `main.py` usa por
+omisión `catalogo_user` y `catalogo_pass` (igual que `.env.example` / Compose).
+La app **puede** seguir respondiendo aunque el Deployment esté mal cableado; la
+verificación que importa es la salida de `env`, no solo que `/health` devuelva
+200.
+
+```bash
+# 1) Piezas presentes (ConfigMap + Secret)
+kubectl exec deploy/catalogo-api -n catalogo-app -- env \
+  | grep -E '^(DB_(HOST|PORT|NAME|USER)|ROOT_PATH)='
+
+# 2) No se inyecta MONGO_URI (decisión “piezas”)
+kubectl exec deploy/catalogo-api -n catalogo-app -- env | grep '^MONGO_URI=' \
+  || echo "OK: MONGO_URI no definida en el Pod"
+
+# 3) Comprobación funcional opcional 
+kubectl exec deploy/catalogo-api -n catalogo-app -- \
+  python -c "import os; print('DB_USER=', os.getenv('DB_USER')); print('DB_PASSWORD set=', bool(os.getenv('DB_PASSWORD')))"
+curl -s "http://172.16.20.15:30502/api/health"
+```
+
+Ajustar host/puerto del `curl` al NodePort del clúster si difiere.
+
+Referencia de ensamblado en código:
+
+```58:64:backend/main.py
+MONGO_URI = os.environ.get("MONGO_URI") or (
+    f"mongodb://{os.environ.get('DB_USER', 'catalogo_user')}"
+    f":{os.environ.get('DB_PASSWORD', 'catalogo_pass')}"
+    f"@{os.environ.get('DB_HOST', 'localhost')}"
+    f":{os.environ.get('DB_PORT', '27017')}"
+    f"/{DB_NAME}?authSource=admin"
+)
+```
+
+## TP Nº 7 — Ejercicio 6 (`catalogo-db-pvc`)
+
+| Recurso | Archivo |
+| --- | --- |
+| PersistentVolumeClaim `catalogo-db-pvc` | `k8s/pvc-catalogo-db.yaml` |
+| Montaje en `/data/db` | `k8s/deploy-catalogo-db.yaml` |
+
+El claim pide **1Gi**, modo **ReadWriteOnce** y **no** fija `storageClassName`
+(uso de la StorageClass por defecto del clúster). Se monta en `/data/db` del
+contenedor `mongo:7` (ruta oficial de datos).
+
+**MongoDB vs MySQL (subPath):** la imagen de MongoDB **no** exige que
+`/data/db` esté vacío al montar; puede usar el volumen directamente en
+`/data/db` sin `subPath`. En la variante B (MySQL) suele hacer falta `subPath`
+para evitar conflictos con archivos que deja el proveedor del volumen — aquí no.
+
+```bash
+kubectl apply -f k8s/pvc-catalogo-db.yaml
+kubectl get pvc,pv -n catalogo-app
+kubectl apply -f k8s/deploy-catalogo-db.yaml
+kubectl get pvc,pv -n catalogo-app
+kubectl exec deploy/catalogo-db -n catalogo-app -- ls -ld /data/db
+```
+
+## TP Nº 7 — Ejercicio 7 (persistencia real)
+
+Cierra la limitación del [TP Nº 6 — MongoDB efímero](#mongodb-efímero-y-pérdida-de-datos-trabajo-práctico-nº-6---ejercicio-9):
+con `catalogo-db-pvc` montado en `/data/db`, al recrear el Pod de MongoDB los
+datos en el volumen **permanecen**.
+
+### Falso positivo (variante C)
+
+Tras borrar la base, el **catálogo de demostración** puede **volver a verse**
+porque `SEED_DEMO=true` (ConfigMap) hace que la API ejecute `sembrar_catalogo()`
+al arrancar (`backend/main.py`). Esa siembra es idempotente por `sku` y **no**
+prueba persistencia.
+
+La **prueba válida** es un producto **cargado a mano en el navegador**, con **su
+imagen** (bytes en MongoDB), con un SKU o nombre que **no** esté en
+`catalogo_demo.py`. Ese ítem debe seguir en la respuesta de la API después del
+`delete pod` de la base.
+
+### Procedimiento
+
+1. Abrir el frontend (NodePort o Ingress) y **crear un producto propio con foto**.
+2. Anotar el `sku` o `nombre` para buscarlo después.
+3. Eliminar el Pod de MongoDB y esperar el reemplazo:
+
+```bash
+kubectl delete pod -l app=catalogo-db -n catalogo-app
+kubectl get pods -n catalogo-app -w
+```
+
+4. Cuando `catalogo-db` esté `1/1 Running`, consultar productos **por el proxy**
+   del frontend (ruta con prefijo `/api`):
+
+```bash
+curl -s http://172.16.20.15:30302/api/productos | head -c 300
+```
+
+Ajustar `172.16.20.15` a la IP del nodo del clúster.
+
+**Resultado esperado:** el producto manual **sigue listado** (y la imagen sigue
+disponible vía la API). Los ítems del demo pueden aparecer además; lo importante
+es **no perder** el creado a mano.
+
+**No usar como única prueba:** un catálogo “lleno” solo con SKUs del demo tras
+reinicios — eso también ocurriría con un volumen vacío + siembra de la API.
+
+## TP Nº 7 — Ejercicio 8 (`catalogo-app-ingress`)
+
+| Recurso | Archivo |
+| --- | --- |
+| Ingress `catalogo-app-ingress` | `k8s/ingress-catalogo-app.yaml` |
+
+Una sola regla: host **`catalogo.local`**, path **`/`** → Service
+`catalogo-frontend:8080`. **No** hay regla `/api`.
+
+### Por qué no enrutar `/api` en el Ingress
+
+En Compose y en este stack la **única** puerta de entrada al navegador es el
+frontend (nginx). El proxy hacia la API vive en la plantilla
+`frontend/nginx/templates/default.conf.template` (`location /api/` →
+`API_HOST:API_PORT`). Si el Ingress duplicara `/api` hacia `catalogo-api`,
+habría **dos** decisiones de enrutamiento (Ingress + nginx del contenedor),
+riesgo de URLs y prefijos distintos a `ROOT_PATH=/api`, y se rompe la paridad
+con Compose, donde **no** existe Ingress.
+
+### Falso positivo: `/productos` vs `/api/productos`
+
+El SPA usa `try_files` para servir `index.html` en rutas desconocidas. Por eso
+`http://catalogo.local/productos` puede devolver **200 + HTML** sin contactar la
+API. La comprobación válida es **`/api/productos`** (proxy nginx → FastAPI).
+
+### Comandos 
+
+```bash
+# IP del balanceador del Ingress Controller (puerto 80, sin :puerto en la URL)
+kubectl get svc -n nginx-ingress nginx-ingress-controller \
+  -o jsonpath='{.status.loadBalancer.ingress[0].ip}'; echo
+
+# Resolver catalogo.local hacia esa IP (una sola vez por máquina)
+# echo "<EXTERNAL-IP> catalogo.local" | sudo tee -a /etc/hosts
+
+kubectl apply -f k8s/ingress-catalogo-app.yaml
+
+kubectl get ingress -n catalogo-app
+
+# Verificación válida (JSON de la API detrás del proxy del frontend)
+curl -s http://catalogo.local/api/productos | head -c 300
+
+# Falso positivo (HTML del SPA, no el catálogo)
+curl -s -o /dev/null -w "%{http_code}\n" http://catalogo.local/productos
+curl -s http://catalogo.local/productos | head -c 120
+```
+
+Esperar que la columna **ADDRESS** del Ingress muestre la IP del controller antes
+de probar con `curl`. El ejercicio **9** valida
+`http://catalogo.local/api/docs` (Swagger y `ROOT_PATH` desde el ConfigMap).
+
+
+## TP Nº 7 — Ejercicio 10 (inventario de objetos)
+
+Tras esta entrega el stack en `catalogo-app` declara **once** recursos
+Kubernetes aplicables con `kubectl apply -f k8s/`. Los manifiestos `pod-*.yaml`
+(período sin controller) y `svc-catalogo-api-nodeport.yaml` (depuración) no
+forman parte del inventario. La entrega **8** añadirá el duodécimo objeto
+(previsto: **HorizontalPodAutoscaler** para la API).
+
+| # | Nombre | Tipo | Función (una línea) | Manifiesto |
+| --- | --- | --- | --- | --- |
+| 1 | `catalogo-api` | Deployment | Réplicas de la API FastAPI que consumen ConfigMap y Secret | `k8s/deploy-catalogo-api.yaml` |
+| 2 | `catalogo-frontend` | Deployment | Réplicas del frontend nginx + SPA que proxean `/api/` hacia la API | `k8s/deploy-catalogo-frontend.yaml` |
+| 3 | `catalogo-db` | Deployment | Réplica única de MongoDB 7 con datos en PVC en `/data/db` | `k8s/deploy-catalogo-db.yaml` |
+| 4 | `catalogo-api` | Service (ClusterIP) | DNS interno y endpoints HTTP (8000) hacia Pods de la API | `k8s/svc-catalogo-api.yaml` |
+| 5 | `catalogo-frontend` | Service (NodePort) | Publicación del frontend (8080; NodePort 30302 en este clúster) | `k8s/svc-catalogo-frontend.yaml` |
+| 6 | `catalogo-db` | Service (ClusterIP) | DNS interno hacia MongoDB (27017) para la API | `k8s/svc-catalogo-db.yaml` |
+| 7 | `catalogo-api-config` | ConfigMap | Variables no sensibles de la API (`DB_*` parcial, `ROOT_PATH`, `SEED_DEMO`) | `k8s/configmap-catalogo-api.yaml` |
+| 8 | `catalogo-frontend-config` | ConfigMap | `API_HOST` y `API_PORT` para el proxy nginx del contenedor frontend | `k8s/configmap-catalogo-frontend.yaml` |
+| 9 | `catalogo-db-secret` | Secret | `MONGO_INITDB_ROOT_*` compartido por MongoDB y API (vía renombrado) | `k8s/secret-catalogo-db.yaml` |
+| 10 | `catalogo-db-pvc` | PersistentVolumeClaim | 1Gi RWO: persistencia de `/data/db` al recrear el Pod de la base | `k8s/pvc-catalogo-db.yaml` |
+| 11 | `catalogo-app-ingress` | Ingress | Entrada HTTP `catalogo.local/` hacia el Service del frontend (sin regla `/api`) | `k8s/ingress-catalogo-app.yaml` |
+
+Consulta global:
+
+```bash
+kubectl get deploy,svc,cm,secret,pvc,ingress -n catalogo-app
+```
+
+## TP Nº 8 — Chart Helm (`catalogo-app/`)
+
+Los doce objetos del inventario (más el HPA como objeto 12) se empaquetan en el
+chart `catalogo-app/`. No incluye `svc-catalogo-api-nodeport` (depuración del
+TP Nº 6). Los manifiestos en `k8s/` conservan valor como referencia; la release
+se instala con Helm sobre el namespace de la práctica.
+
+## TP Nº 8 — Ejercicio 5 (parametrización y conexión a MongoDB)
+
+### Qué quedó configurable en `values.yaml`
+
+El chart no es una copia estática de la séptima entrega: los templates leen
+`values.yaml`. Como mínimo para la evaluación del TP Nº 8:
+
+| Ámbito | Claves en `values.yaml` | Efecto al cambiarlas |
+| --- | --- | --- |
+| Imágenes propias | `api.image.tag`, `frontend.image.tag` | Tag del Deployment correspondiente |
+| Réplicas | `api.replicas`, `frontend.replicas`, `db.replicas` | `spec.replicas` de cada Deployment (la API queda acotada por el HPA entre mínimo y máximo) |
+| Autoescalador | `hpa.minReplicas`, `hpa.maxReplicas`, `hpa.cpuTargetUtilization` | Rango y objetivo de CPU del `catalogo-api-hpa` |
+
+Además se parametrizan credenciales MongoDB, entradas de ConfigMap, NodePort del
+frontend, host del Ingress, tamaño del PVC y `resources.requests` de la API, de
+modo que un `helm upgrade` con `--set` o un `values` distinto altera el
+manifiesto renderizado sin editar templates.
+
+Ejemplo de comprobación local (sin aplicar al clúster):
+
+```bash
+helm template catalogo ./catalogo-app --namespace catalogo-app \
+  --set api.image.tag=v2 --set hpa.maxReplicas=8 | grep -E 'image:|maxReplicas:'
+```
+
+### Decisión: piezas `DB_*` frente a `MONGO_URI` en el chart
+
+Se mantiene la decisión del [TP Nº 7 — ejercicio 5](#tp-nº-7--ejercicio-5-cadena-mongodb-piezas-vs-mongo_uri):
+**piezas por separado**, no una única variable `MONGO_URI`.
+
+En Helm la configuración se reparte así:
+
+- **ConfigMap** (`config.api` → `catalogo-api-config`): `DB_HOST`, `DB_PORT`,
+  `DB_NAME`, `ROOT_PATH`, `SEED_DEMO` (sin contraseña).
+- **Secret** (`secret` → `catalogo-db-secret`): `MONGO_INITDB_ROOT_*`, reutilizado
+  por MongoDB y por la API vía `secretKeyRef` hacia `DB_USER` / `DB_PASSWORD`.
+
+No se define `MONGO_URI` en el Secret ni en el ConfigMap del chart: la cadena
+completa con contraseña no debe partirse entre ambos, y tampoco conviene
+duplicar la contraseña en una clave URI aparte de las claves que ya usa la
+imagen oficial de MongoDB. La API (`backend/main.py`) arma la URI cuando
+`MONGO_URI` no está en el entorno y añade `?authSource=admin`, porque el usuario
+creado con `MONGO_INITDB_ROOT_*` reside en la base `admin`.
+
+La alternativa del enunciado —`MONGO_URI` entera en el Secret, con
+`authSource` incluido en quien redacta la cadena— no se usa en este chart.
+
