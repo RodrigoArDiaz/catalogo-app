@@ -1775,3 +1775,48 @@ creado con `MONGO_INITDB_ROOT_*` reside en la base `admin`.
 La alternativa del enunciado —`MONGO_URI` entera en el Secret, con
 `authSource` incluido en quien redacta la cadena— no se usa en este chart.
 
+## TP Nº 8 — Ejercicio 6 (render e install)
+
+Validación del chart antes de instalar y comprobación en el clúster:
+
+```bash
+helm template catalogo ./catalogo-app --namespace catalogo-app | grep -c '^kind:'
+helm install catalogo ./catalogo-app --namespace catalogo-app --create-namespace
+kubectl get all,cm,secret,pvc,ingress,hpa -n catalogo-app
+```
+
+El render debe producir **doce** objetos. Si el namespace ya contenía recursos
+creados con `kubectl apply` (TP Nº 7), `helm install` puede fallar por
+metadata de ownership; en ese caso conviene un namespace vacío antes de instalar.
+
+## TP Nº 8 — Ejercicio 7 (upgrade, history, rollback)
+
+Ciclo de la release con cambio de tag **solo** en la API. Imagen `v2` publicada
+en el registry con `APP_VERSION=v2` al construir (véase TP Nº 6).
+
+```bash
+helm upgrade catalogo ./catalogo-app --namespace catalogo-app --set api.image.tag=v2
+kubectl rollout status deployment/catalogo-api -n catalogo-app
+helm history catalogo -n catalogo-app
+helm rollback catalogo -n catalogo-app
+kubectl rollout status deployment/catalogo-api -n catalogo-app
+```
+
+Capturas del indicador de versión en el navegador (badge **API v1** / **API v2**)
+antes del upgrade y tras el rollout; otra tras el rollback. El badge consulta
+`GET /api/health` → campo `version` (`frontend/src/components/VersionBadge.jsx`).
+
+### Observación (enunciado): API y frontend, ciclos de vida independientes
+
+Un `helm upgrade` con `--set api.image.tag=v2` modifica únicamente el Deployment
+**catalogo-api** y la imagen que montan sus Pods. **No** altera
+`frontend.image.tag`: el Deployment **catalogo-frontend** sigue en la revisión de
+`values.yaml` (por ejemplo `v1`) salvo que se pase explícitamente
+`--set frontend.image.tag=...` o se cambie el values.
+
+Son **dos imágenes propias** con builds y tags distintos. El texto **«API v2»**
+en la UI no significa que el contenedor nginx/React haya pasado a v2: solo refleja
+lo que la API informa en `/health`, fijado al construir la imagen de la API
+(`ARG` / `ENV APP_VERSION` en `backend/Dockerfile`), sin `APP_VERSION` en
+ConfigMap para no sobrescribirlo.
+
