@@ -31,6 +31,76 @@ El frontend es el único punto de entrada: nadie le habla a la base
 directamente, y a la API le habla el frontend.
 
 
+## Cómo levantar el proyecto
+
+El mismo stack se levanta de dos maneras: con Docker Compose, en una sola máquina, y con Helm, sobre un clúster de Kubernetes.
+
+El usuario y la contraseña de MongoDB que trae el repositorio (`catalogo_user` / `catalogo_pass`) son los del laboratorio. Compose los lee de `.env`, copiado desde `.env.example`. Helm los lee de `catalogo-app/values.yaml`.
+
+### Con Compose, en una sola máquina
+
+Como prerrequisito es necesario tener instalado Docker con Compose. Desde la raíz del repositorio:
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+```
+
+Compose construye `catalogo-api:v1` y `catalogo-frontend:v1`, crea la red `catalogo-net` y el volumen `catalogo-db-data`, y arranca los tres servicios. La API espera el healthcheck de MongoDB. El frontend espera el healthcheck de la API.
+
+La aplicación queda en http://localhost:3000. El navegador envía las peticiones a nginx y nginx reenvía `/api/` a la API. El puerto 8000 queda publicado para depuración: http://localhost:8000/health y http://localhost:8000/docs. MongoDB no publica el puerto 27017 en la máquina.
+
+Para detener los contenedores y conservar los datos del volumen:
+
+```bash
+docker compose down
+```
+
+`docker compose down -v` borra también el volumen `catalogo-db-data`. Con el volumen vacío, el próximo arranque vuelve a crear el usuario de MongoDB con los valores de `.env`.
+
+### Con Helm, sobre el clúster
+
+Como prerrequisito es necesario tener instalados `kubectl` y Helm, y configurado un clúster con un Ingress Controller atendiendo el puerto 80. 
+
+Este camino no construye imágenes: el chart usa las imagenes ya existentes en Docker Hub, [`diazrodrigoar/catalogo-api:v1`](https://hub.docker.com/repository/docker/diazrodrigoar/catalogo-api/tags/v1) y [`diazrodrigoar/catalogo-frontend:v1`](https://hub.docker.com/repository/docker/diazrodrigoar/catalogo-frontend/tags/v1).
+
+Desde la raíz del repositorio, sobre un namespace vacío:
+
+```bash
+helm install catalogo ./catalogo-app --namespace catalogo-app --create-namespace
+kubectl get pods,svc,ingress -n catalogo-app
+```
+
+La release se llama `catalogo` y el namespace es `catalogo-app`. El chart instala el stack completo, con el PVC de MongoDB y el HPA de la API. Si ese namespace ya tiene los objetos creados con `kubectl apply`, `helm install` falla porque los nombres ya existen.
+
+El Ingress publica el host `catalogo.local` y envía el tráfico al frontend. Para abrirlo desde la máquina de prueba, la IP del Ingress tiene que resolver ese nombre:
+
+```bash
+kubectl get ingress -n catalogo-app
+echo "<IP-del-ingress> catalogo.local" | sudo tee -a /etc/hosts
+```
+
+La aplicación queda en http://catalogo.local. También se puede abrir por el NodePort del frontend, sin editar `/etc/hosts`: http://<IP-del-nodo>:30302.
+
+Para aplicar un cambio de `values.yaml` o de los templates sobre la misma release:
+
+```bash
+helm upgrade catalogo ./catalogo-app --namespace catalogo-app
+```
+
+Para borrar la release:
+
+```bash
+helm uninstall catalogo --namespace catalogo-app
+```
+
+Ese comando borra los objetos de la release, incluido el PVC de MongoDB. Con el volumen se pierde el catálogo guardado.
+
+
+## Trabajos prácticos del curso
+
+Las siguientes secciones contienen las notas de cada práctico, en el orden en que se fue construyendo el proyecto.
+
 ### MongoDB - authSource (Trabajo Practico Nº 1 - Ejercicio 6)
 
 El usuario inicial configurado mediante `MONGO_INITDB_ROOT_USERNAME` y
@@ -44,7 +114,7 @@ Sin `authSource=admin`, MongoDB intenta autenticar al usuario contra la base
 `catalogo` y la autenticación falla.
 
 
-## Comparación de imágenes (Trabajo Practico Nº 2 - Ejercicio 8)
+### Comparación de imágenes (Trabajo Practico Nº 2 - Ejercicio 8)
 
 Se utiliza la columna DISK USAGE de Docker, tomando 1.71 GB como 1710 MB.
 Los porcentajes son aproximados porque los tamaños mostrados están redondeados.
@@ -61,7 +131,7 @@ Fórmula: reducción (%) = (1 − tamaño final / tamaño ingenuo) × 100.
 El porcentaje del frontend es una comparación de tamaño entre componentes
 distintos; no representa una optimización de la misma aplicación.
 
-### Aporte de cada decisión (Trabajo Practico Nº 2 - Ejercicio 8)
+#### Aporte de cada decisión (Trabajo Practico Nº 2 - Ejercicio 8)
 
 - Multi-etapa en la API: permite copiar las dependencias instaladas a una imagen final sin incorporar toda la etapa de construcción.
 - python:3.12-slim: reduce el tamaño de la base utilizada para ejecutar la API.
@@ -73,7 +143,7 @@ distintos; no representa una optimización de la misma aplicación.
 - Usuarios sin privilegios: limitan los permisos del proceso durante la ejecución.
 - ARG y ENV para APP_VERSION: permiten definir la versión durante el build y consultarla al ejecutar el contenedor.
 
-## Análisis de capas de la API (Trabajo Practico Nº 2 - Ejercicio 9)
+### Análisis de capas de la API (Trabajo Practico Nº 2 - Ejercicio 9)
 
 Se inspeccionó catalogo-api:v1 con docker history, excluyendo las capas de 0B.
 
@@ -83,12 +153,12 @@ la mayor ocupa 53 MB y corresponde a las dependencias de Python copiadas desde
 /root/.local del builder hacia /home/appuser/.local de la etapa final.
 El código de la aplicación aporta solamente 557 kB.
 
-## Cache - (Trabajo Practico Nº 2 - Ejercicio 10)
+### Cache - (Trabajo Practico Nº 2 - Ejercicio 10)
 
 Al modificar únicamente el código, la instalación de dependencias se reutiliza desde el caché porque requirements.txt se copia e instala antes que el código.
 Al modificar requirements.txt, se invalida su capa de COPY y el RUN de instalación que depende de ella, por lo que pip install vuelve a ejecutarse.
 
-## Publicación en Docker Hub - (Trabajo Practico Nº 2 - Ejercicio 11)
+### Publicación en Docker Hub - (Trabajo Practico Nº 2 - Ejercicio 11)
 
 Imágenes publicadas:
 
@@ -103,7 +173,7 @@ Imágenes publicadas:
 Se utilizó docker login para autenticarse, docker tag para agregar el
 prefijo del usuario y docker push para subir las imágenes al registry.
 
-## Contenedor catalogo-db (Trabajo Practico Nº 3 - Ejercicio 2)
+### Contenedor catalogo-db (Trabajo Practico Nº 3 - Ejercicio 2)
 
 ```bash
 docker run -d \
@@ -136,7 +206,7 @@ Línea del registro que informa que el motor se encuentra a la espera de conexio
 {"t":{"$date":"2026-10-08T20:43:48.400+00:00"},"s":"I",  "c":"NETWORK",  "id":23016,   "ctx":"listener","msg":"Waiting for connections","attr":{"port":27017,"ssl":"off"}}
 ```
 
-### Justificación de la ausencia de `-p`
+#### Justificación de la ausencia de `-p`
 
 La base de datos es la capa más interna del stack: solo la API (`catalogo-api`)
 necesita conectarse a ella, y ambos contenedores comparten la red `catalogo-net`.
@@ -144,9 +214,9 @@ Publicar el puerto 27017 en el anfitrión expondría MongoDB fuera de esa red si
 necesidad. Al omitir `-p`, el motor solo es alcanzable por nombre (`catalogo-db`)
 desde los contenedores conectados a `catalogo-net`.
 
-## Dos modos de falla del motor (Trabajo Practico Nº 3 - Ejercicio 4)
+### Dos modos de falla del motor (Trabajo Practico Nº 3 - Ejercicio 4)
 
-### Explicación
+#### Explicación
 
 Con `DB_HOST=catalogo-bd` (nombre mal escrito), el cliente no resuelve el host en
 la red Docker: el fallo ocurre antes de contactar a MongoDB, por eso el registro
@@ -157,16 +227,16 @@ Con `mongosh` sin `?authSource=admin`, la conexión sí llega al servidor
 base `catalogodb` en lugar de `admin`, donde fue creado con
 `MONGO_INITDB_ROOT_*`; por eso el mensaje es de autenticación fallida.
 
-## Frontend fuera de la red (Trabajo Practico Nº 3 - Ejercicio 5)
+### Frontend fuera de la red (Trabajo Practico Nº 3 - Ejercicio 5)
 
-### Explicación
+#### Explicación
 
 El frontend se inició en la red bridge predeterminada porque se omitió
 `--network catalogo-net`, por lo que no pudo resolver el nombre `catalogo-api`.
 Nginx intenta resolver el upstream al arrancar y, al fallar, termina con código 1
 en lugar de iniciar y reintentar.
 
-## Frontend en catalogo-net (Trabajo Practico Nº 3 - Ejercicio 6)
+### Frontend en catalogo-net (Trabajo Practico Nº 3 - Ejercicio 6)
 
 Al crear un producto con imagen desde `http://localhost:3000`, la petición POST
 aparece en la pestaña Network como `http://localhost:3000/api/productos` (mismo
@@ -177,9 +247,9 @@ No se observan solicitudes OPTIONS: al pasar por el proxy de nginx no hay CORS
 entre orígenes distintos, porque la API se consume bajo el mismo host y puerto
 que la aplicación web.
 
-## Proxy y ROOT_PATH (Trabajo Practico Nº 3 - Ejercicio 7)
+### Proxy y ROOT_PATH (Trabajo Practico Nº 3 - Ejercicio 7)
 
-### Explicación
+#### Explicación
 
 Con `ROOT_PATH=/api`, FastAPI incluye el prefijo en `openapi.json`
 (`servers: [{url: "/api"}]`) y Swagger genera URLs relativas a `/api/...`, que
@@ -187,7 +257,7 @@ coinciden con el proxy. Sin `ROOT_PATH`, las URLs se generan desde la raíz
 (`/productos`, `/docs`, etc.); a través del proxy en `localhost:3000/api/docs`
 esas rutas no existen y la interfaz no carga.
 
-## Orden de arranque (Trabajo Practico Nº 3 - Ejercicio 9)
+### Orden de arranque (Trabajo Practico Nº 3 - Ejercicio 9)
 
 El orden es: **Red → Volumen → Base de datos → API → Frontend**
 
@@ -199,7 +269,7 @@ El orden es: **Red → Volumen → Base de datos → API → Frontend**
 | 4. API `catalogo-api` | Si arranca antes de que la base esté disponible, falla la conexión y puede reintentar o fallar su inicialización. Si la base todavía no existe en la red, también puede fallar la resolución de su nombre. |
 | 5. Frontend `catalogo-frontend` | Nginx necesita resolver `catalogo-api` al arrancar. Si ese nombre todavía no existe en la red, termina con `host not found in upstream`. Si el nombre resuelve pero la API aún no atiende, Nginx puede arrancar y devolver `502 Bad Gateway` al solicitar datos. |
 
-### Limitación actual
+#### Limitación actual
 
 Hay que ejecutar los comandos en el orden correcto y comprobar cuándo está listo
 cada servicio. Ese procedimiento todavía no está declarado en un archivo que
@@ -210,7 +280,7 @@ dependencias. Para esperar a que una base esté realmente lista, se necesita un
 healthcheck y una dependencia condicionada a ese estado; el orden de inicio por
 sí solo no garantiza disponibilidad.
 
-## Healthcheck de catalogo-db (Trabajo Practico Nº 4 - Ejercicio 2)
+### Healthcheck de catalogo-db (Trabajo Practico Nº 4 - Ejercicio 2)
 
 ```yaml
 healthcheck:
@@ -223,7 +293,7 @@ healthcheck:
   start_period: 10s
 ```
 
-### Por qué no lleva credenciales
+#### Por qué no lleva credenciales
 
 `db.adminCommand('ping')` es un comando administrativo que MongoDB acepta sin
 autenticación: solo comprueba que el motor responda en el puerto 27017. El
@@ -238,7 +308,7 @@ definición del servicio, en `docker inspect` y en los logs del daemon. En
 MongoDB, `ping` evita ese problema: el chequeo de salud no necesita conocer
 `catalogo_user` ni `catalogo_pass`.
 
-### Qué no verifica
+#### Qué no verifica
 
 Que `ping` responda con éxito no prueba que el usuario `catalogo_user` exista,
 ni que la contraseña configurada en `MONGO_INITDB_ROOT_PASSWORD` sea la correcta,
@@ -248,7 +318,7 @@ el servidor MongoDB acepta conexiones. La API puede fallar igualmente con
 ejemplo, si el volumen ya fue inicializado con otra contraseña o falta
 `authSource=admin` en la cadena de conexión.
 
-## Healthcheck de catalogo-api (Trabajo Practico Nº 4 - Ejercicio 3)
+### Healthcheck de catalogo-api (Trabajo Practico Nº 4 - Ejercicio 3)
 
 ```yaml
 healthcheck:
@@ -259,7 +329,7 @@ healthcheck:
     - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
 ```
 
-### Por qué no instalar curl solo para el healthcheck
+#### Por qué no instalar curl solo para el healthcheck
 
 La imagen `catalogo-api:v1` ya incluye Python; el módulo `urllib` forma parte de la
 biblioteca estándar y permite hacer un GET a `/health` sin agregar paquetes al
@@ -271,7 +341,7 @@ Nº 2. Además, si la respuesta no es 2xx, `urlopen` lanza excepción y el
 proceso termina con código distinto de cero, que es justo lo que Docker necesita
 para marcar el servicio como `unhealthy`.
 
-## depends_on con condición (Trabajo Practico Nº 4 - Ejercicio 5)
+### depends_on con condición (Trabajo Practico Nº 4 - Ejercicio 5)
 
 ```yaml
 # catalogo-api
@@ -287,7 +357,7 @@ depends_on:
 
 Los dos casos no son equivalentes:
 
-### a) `catalogo-api` respecto de `catalogo-db`
+#### a) `catalogo-api` respecto de `catalogo-db`
 
 La API debe conectarse a MongoDB y sembrar el catálogo al arrancar. La forma
 corta `depends_on: [catalogo-db]` solo espera a que el contenedor de la base
@@ -301,7 +371,7 @@ Además, la API reintenta la conexión durante unos 30 segundos
 Kubernetes, donde no existe `depends_on`: allí la API dependerá únicamente de
 ese bucle de reconexión si arranca antes que la base.
 
-### b) `catalogo-frontend` respecto de `catalogo-api`
+#### b) `catalogo-frontend` respecto de `catalogo-api`
 
 Lo que no puede faltar es algún `depends_on` hacia la API. Sin él, el frontend
 arranca antes que `catalogo-api`, nginx intenta resolver el upstream al iniciar
@@ -313,7 +383,7 @@ que la API ya esté respondiendo en `/health` antes de arrancar nginx, evitando
 respuestas `502 Bad Gateway` en los primeros segundos mientras uvicorn todavía
 está levantando.
 
-## Diferencia entre `down` y `down -v`  (Trabajo Practico Nº 4 - Ejercicio 7)
+### Diferencia entre `down` y `down -v`  (Trabajo Practico Nº 4 - Ejercicio 7)
 
 `docker compose down` borra lo que el próximo `up` recrea igual: contenedores y
 red. El volumen `catalogo-db-data` —declarado con `name:` explícito en el
@@ -325,7 +395,7 @@ el archivo. Con `-v`, `catalogo-db-data` desaparece de `docker volume ls` y
 el próximo `up` arranca MongoDB sobre un volumen vacío: se aplican de nuevo las
 variables `MONGO_INITDB_*` y la API ejecuta la siembra del catálogo demo.
 
-## Variables de entorno (Trabajo Practico Nº 4 - Ejercicio 9)
+### Variables de entorno (Trabajo Practico Nº 4 - Ejercicio 9)
 
 El contrato completo de variables está en [`.env.example`](.env.example), con
 comentarios que indican qué componente consume cada una (`catalogo-db`,
@@ -345,7 +415,7 @@ La API acepta `MONGO_URI` como alternativa a `DB_HOST`, `DB_PORT`, `DB_NAME`,
 Kubernetes (semana 7) debe ubicarse completa en un **Secret**, nunca en un
 ConfigMap.
 
-## Revisión de seguridad (Trabajo Practico Nº 4 - Ejercicio 10)
+### Revisión de seguridad (Trabajo Practico Nº 4 - Ejercicio 10)
 
 Comandos utilizados:
 
@@ -359,7 +429,7 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
   aquasec/trivy image catalogo-frontend:v1
 ```
 
-### a) Usuario de ejecución
+#### a) Usuario de ejecución
 
 | Servicio | Comando | Usuario (uid) | ¿Distinto de root? |
 | --- | --- | --- | --- |
@@ -377,7 +447,7 @@ uid=1000(appuser) gid=1000(appuser) groups=1000(appuser)
 uid=101(nginx) gid=101(nginx) groups=101(nginx)
 ```
 
-### b) Puertos publicados (`docker compose ps`)
+#### b) Puertos publicados (`docker compose ps`)
 
 | Servicio | Puertos en `docker compose ps` | ¿Publicado en el host? |
 | --- | --- | --- |
@@ -385,7 +455,7 @@ uid=101(nginx) gid=101(nginx) groups=101(nginx)
 | `catalogo-api` | `0.0.0.0:8000->8000/tcp` | Sí — solo depuración |
 | `catalogo-frontend` | `0.0.0.0:3000->8080/tcp` | Sí — único punto de entrada |
 
-### c) Puerto 8000 de la API
+#### c) Puerto 8000 de la API
 
 `catalogo-api` publica `8000:8000` únicamente para depurar con `curl` directo
 (`localhost:8000/health`). En producción el navegador entra por
@@ -393,7 +463,7 @@ uid=101(nginx) gid=101(nginx) groups=101(nginx)
 Kubernetes, ese puerto dejará de publicarse en el host y la API pasará a ser un
 Service interno del clúster.
 
-### d) Escaneo de vulnerabilidades (Trivy)
+#### d) Escaneo de vulnerabilidades (Trivy)
 
 Comando (escaneos del 2026-10-15 y 2026-10-16; la primera corrida descarga la
 base de datos de Trivy ~128 MB):
@@ -434,9 +504,9 @@ En la tabla de Trivy, la columna **Fixed Version** indica si existe versión
 corregida. El objetivo no es llegar a cero CVE, sino saber qué hay y haber
 decidido qué aceptar, mitigar o actualizar.
 
-## Mínimo privilegio — `cap_drop: [ALL]` (Trabajo Practico Nº 4 - Ejercicio 11)
+### Mínimo privilegio — `cap_drop: [ALL]` (Trabajo Practico Nº 4 - Ejercicio 11)
 
-### Paso 1: quitar todas las capabilities
+#### Paso 1: quitar todas las capabilities
 
 Se agregó `cap_drop: [ALL]` a los tres servicios en `docker-compose.yml`:
 
@@ -480,7 +550,7 @@ find: '/data/db/.mongodb': Permission denied
 Sin ninguna capability, el entrypoint de MongoDB no puede recorrer ni preparar
 el directorio de datos en el volumen.
 
-### Paso 2: `cap_add` de a una hasta `(healthy)`
+#### Paso 2: `cap_add` de a una hasta `(healthy)`
 
 Se fue agregando una capability por vez en `catalogo-db`, levantando de nuevo y
 leyendo el error en cada paso:
@@ -522,7 +592,7 @@ Los tres servicios alcanzan `(healthy)` y la aplicación responde:
 curl -s localhost:3000/api/productos | head -c 200
 ```
 
-### Por qué la base necesita capabilities y las otras dos capas no
+#### Por qué la base necesita capabilities y las otras dos capas no
 
 | Servicio | Usuario de ejecución | `cap_drop: [ALL]` | `cap_add` | Motivo |
 | --- | --- | --- | --- | --- |
@@ -536,12 +606,12 @@ imagen oficial: necesita un subconjunto mínimo de capabilities para preparar el
 datadir y bajar de root a su usuario de servicio. No se usa `privileged: true`:
 se quitan todas las capabilities y se devuelven solo las cinco imprescindibles.
 
-## De tres `docker run` a un `docker-compose.yml` (Trabajo Practico Nº 4 - Ejercicio 12)
+### De tres `docker run` a un `docker-compose.yml` (Trabajo Practico Nº 4 - Ejercicio 12)
 
 En la semana 3 el stack se levantaba con pasos manuales y tres contenedores por
 separado. En la semana 4, un único archivo declara la misma arquitectura.
 
-### Semana 3 — lo que había que ejecutar
+#### Semana 3 — lo que había que ejecutar
 
 ```bash
 # 0. Infraestructura (antes de los contenedores)
@@ -585,7 +655,7 @@ docker run -d \
 Las imágenes propias se construían aparte (`docker build -t catalogo-api:v1
 ./backend`, idem frontend) antes del `docker run`.
 
-### Semana 4 — un solo comando
+#### Semana 4 — un solo comando
 
 ```bash
 cp .env.example .env   # contrato de variables
@@ -593,7 +663,7 @@ docker compose config
 docker compose up --build -d
 ```
 
-### Qué se conserva (misma arquitectura, otro formato)
+#### Qué se conserva (misma arquitectura, otro formato)
 
 | Semana 3 (`docker run`) | Semana 4 (`docker-compose.yml`) |
 | --- | --- |
@@ -608,7 +678,7 @@ docker compose up --build -d
 Red, volumen, nombres de contenedor, variables, puertos y rutas de build son los
 mismos; solo cambió la notación declarativa.
 
-### Qué desapareció
+#### Qué desapareció
 
 | Antes (semana 3) | Por qué ya no hace falta |
 | --- | --- |
@@ -622,7 +692,7 @@ mismos; solo cambió la notación declarativa.
 | Cuatro o más comandos sueltos en la terminal | Un `docker compose up -d` para todo el stack |
 | `docker rm -f` / `docker network rm` entre pruebas | `docker compose down` (y `down -v` si se quiere borrar datos) |
 
-### Qué apareció
+#### Qué apareció
 
 | Nuevo en Compose | Para qué sirve |
 | --- | --- |
@@ -637,7 +707,7 @@ mismos; solo cambió la notación declarativa.
 | `docker compose ps` con columna de salud | Ver `(healthy)` / `(unhealthy)` de un vistazo |
 | Escaneo Trivy documentado | Revisión de vulnerabilidades de las imágenes propias |
 
-### Resumen
+#### Resumen
 
 La semana 3 demostró que el stack **funciona**; la semana 4 lo **declara**. Lo
 que desaparece es la fricción operativa — comandos sueltos, orden en memoria,
@@ -646,13 +716,13 @@ orquestación declarativa, salud verificable, dependencias condicionadas,
 seguridad básica (`cap_drop`/`cap_add`) y un archivo que en la semana 5 se
 traducirá a manifiestos de Kubernetes.
 
-## Imágenes en el clúster e ImagePullBackOff (Trabajo Práctico Nº 5 - Ejercicio 1)
+### Imágenes en el clúster e ImagePullBackOff (Trabajo Práctico Nº 5 - Ejercicio 1)
 
 El clúster de Kubernetes corre en otra máquina y no utiliza la caché de
 imágenes del Docker Engine local. Las imágenes propias deben publicarse en un
 registry y nombrarse de forma completa en los manifiestos.
 
-### Publicación en Docker Hub
+#### Publicación en Docker Hub
 
 Las imágenes ya estaban publicadas desde el Trabajo Práctico Nº 2:
 
@@ -673,7 +743,7 @@ En los manifiestos de esta entrega se usa el nombre completo
 `diazrodrigoar/<imagen>:v1`. Sin el prefijo del usuario, el kubelet busca en
 Docker Hub una imagen **oficial** con ese nombre — que no existe.
 
-### Error deliberado: imagen sin usuario del registry
+#### Error deliberado: imagen sin usuario del registry
 
 Se creó un Pod de prueba con la imagen mal nombrada:
 
@@ -723,7 +793,7 @@ Events:
   Warning  Failed     86s (x43 over 11m)   kubelet            spec.containers{catalogo-api-pull-test}: Error: ImagePullBackOff
 ```
 
-### Diagnóstico
+#### Diagnóstico
 
 | Dato | Valor |
 | --- | --- |
@@ -749,12 +819,12 @@ kubectl delete pod catalogo-api-pull-test -n default
 ```
 
 
-## CrashLoopBackOff de catalogo-api (Trabajo Práctico Nº 5 - Ejercicio 5)
+### CrashLoopBackOff de catalogo-api (Trabajo Práctico Nº 5 - Ejercicio 5)
 
 La API queda en `CrashLoopBackOff` con `Exit Code: 3` tras 10 reinicios.
 En el manifiesto figura `DB_HOST=catalogo-db`, igual que en Docker Compose.
 
-### kubectl logs catalogo-api --previous
+#### kubectl logs catalogo-api --previous
 
 Tras 10 reintentos de `esperar_mongo()`, pymongo lanza:
 
@@ -766,7 +836,7 @@ En cada intento previo aparece el mismo síntoma:
 
 La aplicación termina con `Application startup failed. Exiting.`
 
-### Tipo de error
+#### Tipo de error
 
 - **Observado:** `ServerSelectionTimeoutError`
 - **No observado:** `Authentication failed`
@@ -776,14 +846,14 @@ servidor MongoDB: el hostname `catalogo-db` no resuelve en el DNS del clúster.
 `Authentication failed` implicaría que la conexión TCP sí llegó a MongoDB y el
 rechazo fue de credenciales; eso no ocurre aquí.
 
-### Causa
+#### Causa
 
 En Kubernetes un Pod no expone nombre DNS a otros Pods. Ese nombre lo provee un
 **Service**, que en esta entrega no existe. Sin Service, `DB_HOST=catalogo-db`
 no es alcanzable aunque el Pod `catalogo-db` esté `Running` en
 `10.244.0.11`.
 
-## API por dirección IP del Pod (Trabajo Práctico Nº 5 - Ejercicio 6)
+### API por dirección IP del Pod (Trabajo Práctico Nº 5 - Ejercicio 6)
 
 Como un Pod existente no admite cambiar variables de entorno con
 `kubectl apply`, se recreó `catalogo-api` tras editar el manifiesto:
@@ -793,7 +863,7 @@ Como un Pod existente no admite cambiar variables de entorno con
   value: "10.244.0.11"
 ```
 
-### Funcionamiento temporal con IP
+#### Funcionamiento temporal con IP
 
 | Pod | IP asignada |
 | --- | --- |
@@ -805,7 +875,7 @@ y en los logs apareció `conexión a MongoDB establecida`. Eso confirma que el
 fallo del ejercicio 5 no era MongoDB ni las credenciales, sino la resolución
 de nombres: por TCP directo a la IP sí se llega.
 
-### Recreación de la base y nueva IP
+#### Recreación de la base y nueva IP
 
 Se eliminó y volvió a crear `catalogo-db` con el mismo manifiesto:
 
@@ -825,7 +895,7 @@ El manifiesto de la API siguió con `DB_HOST=10.244.0.11`. Tras recrear
 `CrashLoopBackOff`: en cada arranque `esperar_mongo()` agota los reintentos
 contra una IP que ya no corresponde al Pod de MongoDB.
 
-### Conclusión
+#### Conclusión
 
 La dirección IP de un Pod es **descartable** (efímera): Kubernetes la asigna
 al crear el Pod y no la conserva si el Pod se elimina y se vuelve a crear.
@@ -838,13 +908,13 @@ Por eso existen los **Services**: ofrecen un nombre DNS estable
 reemplace. Hasta que exista ese Service, el manifiesto de la API queda con
 `DB_HOST=10.244.0.11` — una IP obsoleta — de forma deliberada.
 
-## Frontend: host not found in upstream (Trabajo Práctico Nº 5 - Ejercicio 7)
+### Frontend: host not found in upstream (Trabajo Práctico Nº 5 - Ejercicio 7)
 
 Tras aplicar `k8s/pod-catalogo-frontend.yaml`, el Pod queda en
 `CrashLoopBackOff`. El manifiesto declara `API_HOST=catalogo-api` y
 `API_PORT=8000`, igual que en la semana 3.
 
-### kubectl logs catalogo-frontend -n catalogo-app
+#### kubectl logs catalogo-frontend -n catalogo-app
 
 ```
 /docker-entrypoint.sh: Configuration complete; ready for start up
@@ -857,7 +927,7 @@ nginx resuelve `${API_HOST}` **una sola vez al arrancar** (ver
 el DNS del clúster, el proceso termina con código 1 y el kubelet reinicia el
 contenedor.
 
-### Comparación con la semana 3
+#### Comparación con la semana 3
 
 Es la **tercera vez** en el curso que aparece este mensaje; el texto es
 idéntico, la causa no.
@@ -880,7 +950,7 @@ El patrón es el mismo que en los ejercicios 5 y 6 de esta entrega:
 falla por DNS hacia la API. En Compose esos nombres los resuelve la red;
 en Kubernetes los reemplazan los **Services**.
 
-## Acceso a la API con port-forward (Trabajo Práctico Nº 5 - Ejercicio 8)
+### Acceso a la API con port-forward (Trabajo Práctico Nº 5 - Ejercicio 8)
 
 Sin Service, se accede al Pod concreto mediante un túnel local:
 
@@ -907,7 +977,7 @@ Salida de `/productos` (truncada):
 [{"sku":999666,"categoria":"Apple",...,"nombre":"Apple iPhone 6 (Gold, 32 GB)",...}]
 ```
 
-### `/docs` y `ROOT_PATH=/api`
+#### `/docs` y `ROOT_PATH=/api`
 
 El enunciado plantea comprobar `http://localhost:8000/docs` y explicar el
 efecto de `ROOT_PATH=/api` (decisión de la semana 3) cuando no hay proxy nginx
@@ -942,7 +1012,7 @@ producción el navegador entra por `localhost:3000/api/...`, no por el puerto
 8000 expuesto. El acceso directo con `port-forward` es una excepción de
 depuración.
 
-### port-forward es depuración, no publicación
+#### port-forward es depuración, no publicación
 
 `kubectl port-forward` abre un túnel desde la máquina local hacia **un Pod
 concreto**. No crea DNS en el clúster, no balancea carga, no sobrevive a un
@@ -950,7 +1020,7 @@ reinicio del Pod (hay que relanzar el comando) y no reemplaza a un **Service**
 ni a un **Ingress**. Sirve para probar `/health` y `/productos` durante el
 desarrollo; no es un mecanismo de publicación.
 
-## Pods sin controller (Trabajo Práctico Nº 5 - Ejercicio 9)
+### Pods sin controller (Trabajo Práctico Nº 5 - Ejercicio 9)
 
 Se eliminó el Pod de la API con:
 
@@ -970,7 +1040,7 @@ catalogo-frontend   0/1     CrashLoopBackOff   30 (5m3s ago)   142m
 Ningún componente del clúster lo recreó. Tras varios minutos, `kubectl get
 pods -w` sigue sin mostrar un Pod `catalogo-api` nuevo.
 
-### Qué demuestra
+#### Qué demuestra
 
 | Acción | Pod suelto (esta entrega) | Deployment (semana 6) |
 | --- | --- | --- |
@@ -983,7 +1053,7 @@ a aplicar el manifiesto (`kubectl apply -f k8s/pod-catalogo-api.yaml`). Ese
 hecho es el punto de partida de la clase siguiente, donde un **Deployment**
 declara cuántas copias deben existir y un controller las sostiene.
 
-## Cheatsheet kubectl — Trabajo Práctico Nº 5 (Ejercicio 10)
+### Cheatsheet kubectl — Trabajo Práctico Nº 5 (Ejercicio 10)
 
 Diez comandos usados en esta entrega sobre el namespace `catalogo-app`:
 
@@ -1000,14 +1070,14 @@ Diez comandos usados en esta entrega sobre el namespace `catalogo-app`:
 | 9 | `kubectl delete pod catalogo-api -n catalogo-app` | Borrar un Pod suelto; comprobar en el ejercicio 9 que nadie lo recrea. También necesario antes de recrear un Pod cuyo spec no admite cambios in-place. |
 | 10 | `kubectl port-forward pod/catalogo-api 8000:8000 -n catalogo-app` | Túnel local al Pod para probar `/health` y `/productos` sin Service (ejercicio 8). |
 
-## De `docker-compose.yml` a tres manifiestos de Pod (Trabajo Práctico Nº 5 - Ejercicio 11)
+### De `docker-compose.yml` a tres manifiestos de Pod (Trabajo Práctico Nº 5 - Ejercicio 11)
 
 El `docker-compose.yml` de la semana 4 levanta el stack completo con un
 comando. Esta entrega lo traduce a tres Pods sueltos en el namespace
 `catalogo-app`, **sin** Deployments ni Services — a propósito, para observar
 qué deja de funcionar.
 
-### Qué se conserva (misma arquitectura, otro formato)
+#### Qué se conserva (misma arquitectura, otro formato)
 
 | `docker-compose.yml` (semana 4) | Manifiestos K8s (`k8s/pod-*.yaml`) |
 | --- | --- |
@@ -1025,7 +1095,7 @@ Las tres capas, imágenes, variables y puertos internos son los mismos; cambió
 la notación (`services`/`environment` → `kind: Pod`/`spec.containers`) y el
 runtime (Docker Engine local → clúster Kubernetes).
 
-### Qué desapareció
+#### Qué desapareció
 
 | En Compose (semana 4) | En Pods sueltos (semana 5) | Efecto |
 | --- | --- | --- |
@@ -1042,7 +1112,7 @@ runtime (Docker Engine local → clúster Kubernetes).
 | `docker compose down` / `ps` | `kubectl delete pod` / `get pods` | Pods borrados no vuelven solos (ejercicio 9) |
 | Resolución DNS entre servicios | — | `DB_HOST=catalogo-db` y `API_HOST=catalogo-api` **fallan** sin Service |
 
-### Qué todavía falta (deliberadamente — semanas 6 y 7)
+#### Qué todavía falta (deliberadamente — semanas 6 y 7)
 
 | Pieza ausente | Qué resolvía en Compose | Cuándo entra en el curso |
 | --- | --- | --- |
@@ -1055,7 +1125,7 @@ runtime (Docker Engine local → clúster Kubernetes).
 | **Probes** | Sustituto de `healthcheck` + `depends_on: service_healthy` | Semana 6–7 |
 | **Namespace** `catalogo-app` | Aislamiento lógico del proyecto | Ya creado; los Services vivirán ahí |
 
-### Resumen
+#### Resumen
 
 La semana 4 **declara y encadena** el stack en un host Docker. La semana 5
 **replica la forma** (tres capas, mismas variables) pero en Pods sueltos sobre
@@ -1066,7 +1136,7 @@ Deployments, almacenamiento, Secrets e Ingress — es exactamente lo que explica
 por qué esta entrega falla en DNS, IPs efímeras y Pods que nadie recrea, y lo
 que la semana 6 en adelante va a agregar.
 
-## Selectors y Endpoints (Trabajo Práctico Nº 6 - Ejercicio 3)
+### Selectors y Endpoints (Trabajo Práctico Nº 6 - Ejercicio 3)
 
 Cada Service en `k8s/svc-*.yaml` declara un selector `app: catalogo-*`. Los
 Deployments en `k8s/deploy-*.yaml` etiquetan sus Pods con la misma label en
@@ -1109,7 +1179,7 @@ En clústeres 1.33+ conviene corroborar con
 `kubectl get endpointslices -n catalogo-app` si aparece el warning de
 deprecación; las direcciones deben coincidir con las de `get endpoints`.
 
-## Acceso a la aplicación por NodePort (Trabajo Práctico Nº 6 - Ejercicio 4)
+### Acceso a la aplicación por NodePort (Trabajo Práctico Nº 6 - Ejercicio 4)
 
 La aplicación se abre en el NodePort del frontend (`30302`), usando la
 **INTERNAL-IP** del nodo (no `localhost`):
@@ -1121,7 +1191,7 @@ http://172.16.20.15:30302
 Desde ahí se cargó un producto con imagen; el tráfico recorre nginx → Service
 `catalogo-api` → MongoDB vía Service `catalogo-db`.
 
-## Service NodePort de depuración para la API (Trabajo Práctico Nº 6 - Ejercicio 5)
+### Service NodePort de depuración para la API (Trabajo Práctico Nº 6 - Ejercicio 5)
 
 Objeto adicional en `k8s/svc-catalogo-api-nodeport.yaml`: expone la API
 directamente en el puerto **30502** del nodo, con el mismo selector
@@ -1144,7 +1214,7 @@ no forma parte del chart de la semana 8: existe **solo con fines de
 depuración** (probar `/health`, `/productos` y balanceo entre réplicas sin
 pasar por nginx).
 
-## Autorreparación del Deployment (Trabajo Práctico Nº 6 - Ejercicio 6)
+### Autorreparación del Deployment (Trabajo Práctico Nº 6 - Ejercicio 6)
 
 Con la aplicación abierta en `http://172.16.20.15:30302` y dos réplicas de la
 API (`deploy-catalogo-api.yaml`), se eliminó **una** réplica por nombre:
@@ -1167,7 +1237,7 @@ El Service `catalogo-api` mantiene dos direcciones en ENDPOINTS: mientras al
 menos una réplica esté **Ready**, el frontend en `:30302` sigue respondiendo;
 no fue necesario volver a aplicar manifiestos.
 
-### Contraste con la semana 5
+#### Contraste con la semana 5
 
 | | Semana 5 (Pod suelto) | Semana 6 (Deployment) |
 | --- | --- | --- |
@@ -1181,7 +1251,7 @@ En la semana 5 un Pod suelto era **mortal**. En la semana 6 el clúster
 **sostiene** el número de réplicas: borrar un Pod es un incidente que el
 controlador corrige, no un estado final.
 
-## Rolling update y rollback de la API (Trabajo Práctico Nº 6 - Ejercicio 7)
+### Rolling update y rollback de la API (Trabajo Práctico Nº 6 - Ejercicio 7)
 
 El frontend muestra la versión en un badge (`VersionBadge.jsx`): lee
 `/api/health` y muestra `API v1`, `API v2`, etc. según el campo `version`
@@ -1192,7 +1262,7 @@ Pods viejos y nuevos: el badge puede **oscilar** entre v1 y v2 hasta que
 termina la actualización; luego queda estable en v2. Tras `rollout undo`,
 vuelve a v1.
 
-### Inconveniente: `APP_VERSION` fijo en el manifiesto
+#### Inconveniente: `APP_VERSION` fijo en el manifiesto
 
 Si se declara `APP_VERSION` en `env` del Pod o del Deployment (o en un
 ConfigMap montado como variables de entorno) y se copia el mismo patrón a
@@ -1221,7 +1291,7 @@ Deployment o el Pod. Volver a aplicar el Deployment
 `set image` / `rollout undo`. Para volver a v1 por manifiesto, el YAML puede
 fijar `image: ...:v1` sin `APP_VERSION` en el entorno.
 
-### Publicar imagen v2
+#### Publicar imagen v2
 
 El clúster solo descarga imágenes del registry; el tag debe incluir el usuario.
 
@@ -1234,7 +1304,7 @@ El `Dockerfile` de la API define `ARG APP_VERSION` y `ENV APP_VERSION` (semana
 2). Sin ese par, la imagen v2 seguiría reportando v1 en `/health` y el badge
 no cambiaría.
 
-### Actualización progresiva
+#### Actualización progresiva
 
 ```bash
 kubectl set image deployment/catalogo-api \
@@ -1254,7 +1324,7 @@ curl -s http://172.16.20.15:30502/health
 
 Respuesta esperada tras el rollout: `"version":"v2"`.
 
-### Rollback
+#### Rollback
 
 ```bash
 kubectl rollout undo deployment/catalogo-api -n catalogo-app
@@ -1265,7 +1335,7 @@ El badge debe volver a **API v1**. La columna `CHANGE-CAUSE` de
 `kubectl rollout history` puede mostrar `<none>`; las revisiones se registran
 igual (comportamiento esperado del enunciado).
 
-### Errores frecuentes
+#### Errores frecuentes
 
 | Síntoma | Causa |
 | --- | --- |
@@ -1277,14 +1347,14 @@ igual (comportamiento esperado del enunciado).
 Si la actualización falla por imagen, las réplicas en v1 siguen sirviendo;
 `kubectl rollout undo` revierte al ReplicaSet anterior.
 
-## Escalar la API y estado sin disco local (Trabajo Práctico Nº 6 - Ejercicio 8)
+### Escalar la API y estado sin disco local (Trabajo Práctico Nº 6 - Ejercicio 8)
 
 El Service `catalogo-api-nodeport` (puerto **30502**) balancea entre **todas**
 las réplicas del Deployment con label `app=catalogo-api`. Al escalar, Kubernetes
 añade Pods; el Endpoints / EndpointSlice del Service incorpora sus IPs sin
 cambiar el manifiesto del Service.
 
-### Escalar a tres réplicas
+#### Escalar a tres réplicas
 
 ```bash
 kubectl scale deployment catalogo-api --replicas=3 -n catalogo-app
@@ -1295,7 +1365,7 @@ kubectl get endpoints catalogo-api -n catalogo-app
 Tras unos segundos deben verse **tres** Pods y **tres** direcciones `:8000` en
 ENDPOINTS de `catalogo-api`.
 
-### Producto con imagen y respuesta desde cualquier réplica
+#### Producto con imagen y respuesta desde cualquier réplica
 
 En `http://172.16.20.15:30302` se carga o edita un producto con imagen (misma
 prueba que el ejercicio 4). El frontend habla con el ClusterIP `catalogo-api`;
@@ -1328,7 +1398,7 @@ El manifiesto `deploy-catalogo-api.yaml` sigue declarando `replicas: 2`; el
 `kubectl apply -f k8s/deploy-catalogo-api.yaml` volvería a fijar dos réplicas
 salvo que se actualice el YAML.
 
-### Disco del contenedor vs otra réplica (demostración)
+#### Disco del contenedor vs otra réplica (demostración)
 
 Si la API guardara fotos en el filesystem del Pod (`/tmp`, `/var/...`), cada
 réplica tendría su propio disco efímero: lo escrito en un contenedor no lo vería
@@ -1354,7 +1424,7 @@ borra o recrea el Pod (`delete pod`, rollout, crash), el contenido de
 elegida al azar; para comparar entre Pods hace falta el nombre concreto de cada
 Pod, como arriba.
 
-### Respuesta por escrito (enunciado)
+#### Respuesta por escrito (enunciado)
 
 Un archivo escrito en el disco de un Pod **no lo ve ninguna otra réplica**, y
 **desaparece** cuando el Pod se recrea. Por esa razón esta variante guarda los
@@ -1369,9 +1439,9 @@ respecto del filesystem) siempre que el estado compartido (datos e imágenes)
 resida en un servicio centralizado — aquí MongoDB — y no en el disco local del
 Pod.
 
-## MongoDB efímero y pérdida de datos (Trabajo Práctico Nº 6 - Ejercicio 9)
+### MongoDB efímero y pérdida de datos (Trabajo Práctico Nº 6 - Ejercicio 9)
 
-### Limitación conocida (declarada)
+#### Limitación conocida (declarada)
 
 `catalogo-db` es un **Deployment** con imagen `mongo:7` y **sin** volumen
 persistente en `k8s/deploy-catalogo-db.yaml`: los datos viven en el filesystem
@@ -1390,7 +1460,7 @@ no había `catalogo-db-pvc` ni montaje en `/data/db` (ver sección ejercicio 6).
 de este README. El procedimiento de abajo describe el comportamiento **sin**
 PVC (entrega anterior).
 
-### Procedimiento observado (sin volumen persistente)
+#### Procedimiento observado (sin volumen persistente)
 
 Antes conviene tener en la UI al menos un producto **propio** (no solo el demo)
 para notar la diferencia tras el incidente.
@@ -1427,7 +1497,7 @@ curl -s http://172.16.20.15:30502/productos | head -c 400
 cargados **a mano** antes del delete de MongoDB **no** vuelven: la siembra no
 restaura documentos que no están en el demo.
 
-### Por qué pasa (cadena causa → efecto)
+#### Por qué pasa (cadena causa → efecto)
 
 ```text
 delete pod MongoDB
@@ -1446,7 +1516,7 @@ Deployment recrea la réplica y **MongoDB intacto** conserva todo. Aquí el
 cuello de botella es la **persistencia de la base**, no el número de réplicas de
 la API.
 
-### Nota operativa
+#### Nota operativa
 
 Tras el ejercicio 8, la API puede seguir en **3** réplicas por el `scale`; el
 `rollout restart` las reinicia todas. Para volver al manifiesto:
@@ -1455,7 +1525,7 @@ Tras el ejercicio 8, la API puede seguir en **3** réplicas por el `scale`; el
 kubectl scale deployment catalogo-api --replicas=2 -n catalogo-app
 ```
 
-## ConfigMap y Secret del TP Nº 7 (Ejercicios 1 a 3)
+### ConfigMap y Secret del TP Nº 7 (Ejercicios 1 a 3)
 
 Objetos de configuración (sin cablear Deployments hasta el ejercicio 4):
 
@@ -1471,7 +1541,7 @@ kubectl apply -f k8s/configmap-catalogo-frontend.yaml
 kubectl apply -f k8s/secret-catalogo-db.yaml
 ```
 
-## TP Nº 7 — Ejercicio 3 (Secret y base64)
+### TP Nº 7 — Ejercicio 3 (Secret y base64)
 
 `kubectl get secret` muestra la clave en **base64**, que sirve para transporte
 en YAML, no para ocultar la contraseña. Cualquiera con acceso de lectura al
@@ -1486,7 +1556,7 @@ Para que el dato esté **realmente** protegido hace falta **cifrado en reposo en
 etcd** (p. ej. `EncryptionConfiguration` en el apiserver) o un **gestor de
 secretos externo** (HashiCorp Vault, cloud KMS, etc.) integrado al clúster.
 
-## TP Nº 7 — Ejercicio 4 (Deployments)
+### TP Nº 7 — Ejercicio 4 (Deployments)
 
 Los tres Deployments (`deploy-catalogo-*.yaml`) referencian esos objetos: `envFrom`
 con `configMapRef`, credenciales con `valueFrom.secretKeyRef` (la API expone
@@ -1507,9 +1577,9 @@ kubectl exec deploy/catalogo-api -n catalogo-app -- env \
 kubectl exec deploy/catalogo-frontend -n catalogo-app -- env | grep API_
 ```
 
-## TP Nº 7 — Ejercicio 5 (cadena MongoDB: piezas vs `MONGO_URI`)
+### TP Nº 7 — Ejercicio 5 (cadena MongoDB: piezas vs `MONGO_URI`)
 
-### Decisión
+#### Decisión
 
 Se eligió **piezas por separado**: `DB_HOST`, `DB_PORT` y `DB_NAME` en el
 ConfigMap `catalogo-api-config`; `DB_USER` y `DB_PASSWORD` en el contenedor vía
@@ -1520,7 +1590,7 @@ La API (`backend/main.py`) arma la URI solo si `MONGO_URI` no está definida y
 añade `?authSource=admin` en el código, porque el usuario creado con
 `MONGO_INITDB_ROOT_*` vive en la base `admin`.
 
-### Por qué no `MONGO_URI` en el Secret
+#### Por qué no `MONGO_URI` en el Secret
 
 - **Un solo Secret para Mongo y API**: las claves oficiales de la imagen MongoDB
   (`MONGO_INITDB_ROOT_*`) se reutilizan con `valueFrom` hacia `DB_USER` /
@@ -1535,7 +1605,7 @@ añade `?authSource=admin` en el código, porque el usuario creado con
 La alternativa válida es poner `MONGO_URI` entera en el Secret (incluyendo
 `?authSource=admin` redactado por quien escribe el Secret); no se usa aquí.
 
-### Advertencia del enunciado (defaults en la imagen)
+#### Advertencia del enunciado (defaults en la imagen)
 
 Si **no** llegan `DB_USER` o `DB_PASSWORD` al contenedor, `main.py` usa por
 omisión `catalogo_user` y `catalogo_pass` (igual que `.env.example` / Compose).
@@ -1572,7 +1642,7 @@ MONGO_URI = os.environ.get("MONGO_URI") or (
 )
 ```
 
-## TP Nº 7 — Ejercicio 6 (`catalogo-db-pvc`)
+### TP Nº 7 — Ejercicio 6 (`catalogo-db-pvc`)
 
 | Recurso | Archivo |
 | --- | --- |
@@ -1596,13 +1666,13 @@ kubectl get pvc,pv -n catalogo-app
 kubectl exec deploy/catalogo-db -n catalogo-app -- ls -ld /data/db
 ```
 
-## TP Nº 7 — Ejercicio 7 (persistencia real)
+### TP Nº 7 — Ejercicio 7 (persistencia real)
 
 Cierra la limitación del [TP Nº 6 — MongoDB efímero](#mongodb-efímero-y-pérdida-de-datos-trabajo-práctico-nº-6---ejercicio-9):
 con `catalogo-db-pvc` montado en `/data/db`, al recrear el Pod de MongoDB los
 datos en el volumen **permanecen**.
 
-### Falso positivo (variante C)
+#### Falso positivo (variante C)
 
 Tras borrar la base, el **catálogo de demostración** puede **volver a verse**
 porque `SEED_DEMO=true` (ConfigMap) hace que la API ejecute `sembrar_catalogo()`
@@ -1614,7 +1684,7 @@ imagen** (bytes en MongoDB), con un SKU o nombre que **no** esté en
 `catalogo_demo.py`. Ese ítem debe seguir en la respuesta de la API después del
 `delete pod` de la base.
 
-### Procedimiento
+#### Procedimiento
 
 1. Abrir el frontend (NodePort o Ingress) y **crear un producto propio con foto**.
 2. Anotar el `sku` o `nombre` para buscarlo después.
@@ -1641,7 +1711,7 @@ es **no perder** el creado a mano.
 **No usar como única prueba:** un catálogo “lleno” solo con SKUs del demo tras
 reinicios — eso también ocurriría con un volumen vacío + siembra de la API.
 
-## TP Nº 7 — Ejercicio 8 (`catalogo-app-ingress`)
+### TP Nº 7 — Ejercicio 8 (`catalogo-app-ingress`)
 
 | Recurso | Archivo |
 | --- | --- |
@@ -1650,7 +1720,7 @@ reinicios — eso también ocurriría con un volumen vacío + siembra de la API.
 Una sola regla: host **`catalogo.local`**, path **`/`** → Service
 `catalogo-frontend:8080`. **No** hay regla `/api`.
 
-### Por qué no enrutar `/api` en el Ingress
+#### Por qué no enrutar `/api` en el Ingress
 
 En Compose y en este stack la **única** puerta de entrada al navegador es el
 frontend (nginx). El proxy hacia la API vive en la plantilla
@@ -1660,13 +1730,13 @@ habría **dos** decisiones de enrutamiento (Ingress + nginx del contenedor),
 riesgo de URLs y prefijos distintos a `ROOT_PATH=/api`, y se rompe la paridad
 con Compose, donde **no** existe Ingress.
 
-### Falso positivo: `/productos` vs `/api/productos`
+#### Falso positivo: `/productos` vs `/api/productos`
 
 El SPA usa `try_files` para servir `index.html` en rutas desconocidas. Por eso
 `http://catalogo.local/productos` puede devolver **200 + HTML** sin contactar la
 API. La comprobación válida es **`/api/productos`** (proxy nginx → FastAPI).
 
-### Comandos 
+#### Comandos 
 
 ```bash
 # IP del balanceador del Ingress Controller (puerto 80, sin :puerto en la URL)
@@ -1693,7 +1763,7 @@ de probar con `curl`. El ejercicio **9** valida
 `http://catalogo.local/api/docs` (Swagger y `ROOT_PATH` desde el ConfigMap).
 
 
-## TP Nº 7 — Ejercicio 10 (inventario de objetos)
+### TP Nº 7 — Ejercicio 10 (inventario de objetos)
 
 Tras esta entrega el stack en `catalogo-app` declara **once** recursos
 Kubernetes aplicables con `kubectl apply -f k8s/`. Los manifiestos `pod-*.yaml`
@@ -1721,16 +1791,16 @@ Consulta global:
 kubectl get deploy,svc,cm,secret,pvc,ingress -n catalogo-app
 ```
 
-## TP Nº 8 — Chart Helm (`catalogo-app/`)
+### TP Nº 8 — Chart Helm (`catalogo-app/`)
 
 Los doce objetos del inventario (más el HPA como objeto 12) se empaquetan en el
 chart `catalogo-app/`. No incluye `svc-catalogo-api-nodeport` (depuración del
 TP Nº 6). Los manifiestos en `k8s/` conservan valor como referencia; la release
 se instala con Helm sobre el namespace de la práctica.
 
-## TP Nº 8 — Ejercicio 5 (parametrización y conexión a MongoDB)
+### TP Nº 8 — Ejercicio 5 (parametrización y conexión a MongoDB)
 
-### Qué quedó configurable en `values.yaml`
+#### Qué quedó configurable en `values.yaml`
 
 El chart no es una copia estática de la séptima entrega: los templates leen
 `values.yaml`. Como mínimo para la evaluación del TP Nº 8:
@@ -1753,7 +1823,7 @@ helm template catalogo ./catalogo-app --namespace catalogo-app \
   --set api.image.tag=v2 --set hpa.maxReplicas=8 | grep -E 'image:|maxReplicas:'
 ```
 
-### Decisión: piezas `DB_*` frente a `MONGO_URI` en el chart
+#### Decisión: piezas `DB_*` frente a `MONGO_URI` en el chart
 
 Se mantiene la decisión del [TP Nº 7 — ejercicio 5](#tp-nº-7--ejercicio-5-cadena-mongodb-piezas-vs-mongo_uri):
 **piezas por separado**, no una única variable `MONGO_URI`.
@@ -1775,7 +1845,7 @@ creado con `MONGO_INITDB_ROOT_*` reside en la base `admin`.
 La alternativa del enunciado —`MONGO_URI` entera en el Secret, con
 `authSource` incluido en quien redacta la cadena— no se usa en este chart.
 
-## TP Nº 8 — Ejercicio 6 (render e install)
+### TP Nº 8 — Ejercicio 6 (render e install)
 
 Validación del chart antes de instalar y comprobación en el clúster:
 
@@ -1789,7 +1859,7 @@ El render debe producir **doce** objetos. Si el namespace ya contenía recursos
 creados con `kubectl apply` (TP Nº 7), `helm install` puede fallar por
 metadata de ownership; en ese caso conviene un namespace vacío antes de instalar.
 
-## TP Nº 8 — Ejercicio 7 (upgrade, history, rollback)
+### TP Nº 8 — Ejercicio 7 (upgrade, history, rollback)
 
 Ciclo de la release con cambio de tag **solo** en la API. Imagen `v2` publicada
 en el registry con `APP_VERSION=v2` al construir (véase TP Nº 6).
@@ -1806,7 +1876,7 @@ Capturas del indicador de versión en el navegador (badge **API v1** / **API v2*
 antes del upgrade y tras el rollout; otra tras el rollback. El badge consulta
 `GET /api/health` → campo `version` (`frontend/src/components/VersionBadge.jsx`).
 
-### Observación (enunciado): API y frontend, ciclos de vida independientes
+#### Observación (enunciado): API y frontend, ciclos de vida independientes
 
 Un `helm upgrade` con `--set api.image.tag=v2` modifica únicamente el Deployment
 **catalogo-api** y la imagen que montan sus Pods. **No** altera
